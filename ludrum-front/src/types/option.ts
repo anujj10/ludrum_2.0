@@ -60,11 +60,11 @@ export type OIChangeEvent = {
 }
 
 export type StreamData = {
-  spot: number
-  pairs: PairSignal[]
-  open_positions: Position[]
-  closed_positions: Position[]
-  portfolio: Portfolio
+  spot?: number
+  pairs?: PairSignal[]
+  open_positions?: Position[]
+  closed_positions?: Position[]
+  portfolio?: Portfolio
 }
 
 export type StreamMessage = {

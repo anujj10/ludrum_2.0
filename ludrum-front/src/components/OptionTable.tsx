@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useOptionStore } from "../store/useOptionStore"
 import { API_BASE_URL } from "../config"
-import type { OIChangeEvent, PairSignal, Position, StrikeAnalytics } from "../types/option"
+import type { OIChangeEvent, PairSignal, Portfolio, Position, StrikeAnalytics } from "../types/option"
 
 const STRIKE_STEP = 50
 
@@ -395,6 +395,7 @@ function SpotRow({ spot }: { spot: number }) {
 export default function OptionTable() {
   const [tradeMessage, setTradeMessage] = useState("")
   const [oiHistoryMap, setOIHistoryMap] = useState<OIHistoryMap>({})
+  const hydrate = useOptionStore((state) => state.hydrate)
   const strikeMap = useOptionStore((state) => state.strikeMap)
   const spot = useOptionStore((state) => state.spot)
   const portfolio = useOptionStore((state) => state.portfolio)
@@ -420,6 +421,56 @@ export default function OptionTable() {
     if (!closest) return pair
     return Math.abs(pair.Strike - spot) < Math.abs(closest.Strike - spot) ? pair : closest
   }, null)
+
+  useEffect(() => {
+    let active = true
+
+    async function hydrateFromHttp() {
+      try {
+        const [pairsResponse, positionsResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/pairs`),
+          fetch(`${API_BASE_URL}/positions`),
+        ])
+
+        const nextState: {
+          pairs?: PairSignal[]
+          open_positions?: Position[]
+          portfolio?: Portfolio
+        } = {}
+
+        if (pairsResponse.ok) {
+          nextState.pairs = (await pairsResponse.json()) as PairSignal[]
+        }
+
+        if (positionsResponse.ok) {
+          const positionsPayload = (await positionsResponse.json()) as {
+            positions?: Position[]
+            portfolio?: Portfolio
+          }
+          nextState.open_positions = positionsPayload.positions
+          nextState.portfolio = positionsPayload.portfolio
+        }
+
+        if (!active) return
+
+        if (nextState.pairs?.length || nextState.open_positions || nextState.portfolio) {
+          hydrate(nextState, "snapshot")
+        }
+      } catch {
+        // Keep the websocket as the primary feed and silently skip HTTP fallback failures.
+      }
+    }
+
+    void hydrateFromHttp()
+    const interval = window.setInterval(() => {
+      void hydrateFromHttp()
+    }, 5000)
+
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [hydrate])
 
   useEffect(() => {
     if (!displayStrikes.length) {
