@@ -457,20 +457,163 @@
 
 @media (max-width: 768px) {
   .terminal-shell {
-    width: min(100vw - 20px, 1480px);
+    width: min(100vw - 16px, 1480px);
     padding-top: 12px;
+    padding-bottom: 24px;
   }
 
   .topbar,
   .panel {
     border-radius: 18px;
-    padding: 16px;
+    padding: 14px;
   }
 
-  .chain-table th,
-  .chain-table td,
   .mini-table th,
   .mini-table td {
     padding: 12px 10px;
+  }
+
+  .topbar h1 {
+    font-size: 1.6rem;
+  }
+
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+  }
+
+  .panel-head {
+    gap: 8px;
+  }
+
+  .panel-head h2 {
+    font-size: 1.35rem;
+  }
+
+  .chain-panel .table-wrap {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .chain-table,
+  .chain-table tbody,
+  .chain-table tr,
+  .chain-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .chain-table thead {
+    display: none;
+  }
+
+  .chain-table tbody {
+    display: grid;
+    gap: 14px;
+  }
+
+  .chain-table tr {
+    padding: 12px;
+    border-radius: 18px;
+    border: 1px solid rgba(110, 135, 172, 0.12);
+    background: rgba(7, 13, 24, 0.72);
+  }
+
+  .chain-table td {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .chain-leg,
+  .chain-strike {
+    width: 100%;
+  }
+
+  .chain-strike {
+    display: flex;
+    justify-content: center;
+    padding: 8px 0;
+  }
+
+  .strike-chip {
+    min-width: 0;
+    width: min(100%, 160px);
+  }
+
+  .leg-panel {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .leg-top {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .metric-block {
+    min-width: 0;
+  }
+
+  .metric.price {
+    font-size: 1rem;
+  }
+
+  .series-box {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+
+  .ticket-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ticket-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .trade-btn,
+  .exit-btn,
+  .ticket-field input {
+    min-height: 42px;
+  }
+
+  .spot-row td:first-child,
+  .spot-row td:last-child {
+    display: none;
+  }
+
+  .spot-row .chain-strike {
+    padding: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .terminal-shell {
+    width: calc(100vw - 12px);
+  }
+
+  .topbar,
+  .panel {
+    padding: 12px;
+  }
+
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .leg-top {
+    grid-template-columns: 1fr;
+  }
+
+  .oi-values,
+  .oi-values.right {
+    justify-content: center;
+  }
+
+  .leg-panel.right {
+    text-align: left;
   }
 }
