@@ -1,7 +1,10 @@
 package api
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -35,6 +38,11 @@ type verifyOTPPayload struct {
 	OTP      string `json:"otp"`
 }
 
+type adminTokenClaims struct {
+	ClientID  string `json:"client_id"`
+	ExpiresAt int64  `json:"exp"`
+}
+
 func RegisterAuthRoutes(mux *http.ServeMux) {
 	api := &AuthAPI{}
 	mux.HandleFunc("/auth/beta-request", api.handleBetaRequest)
@@ -42,6 +50,9 @@ func RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/verify-otp", api.handleVerifyOTP)
 	mux.HandleFunc("/auth/me", api.handleMe)
 	mux.HandleFunc("/auth/logout", api.handleLogout)
+	mux.HandleFunc("/auth/admin/login", api.handleAdminLogin)
+	mux.HandleFunc("/auth/admin/me", api.handleAdminMe)
+	mux.HandleFunc("/auth/admin/logout", api.handleAdminLogout)
 }
 
 func (a *AuthAPI) handleBetaRequest(w http.ResponseWriter, r *http.Request) {
@@ -220,6 +231,147 @@ func (a *AuthAPI) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
+}
+
+func (a *AuthAPI) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	adminClientID := strings.TrimSpace(os.Getenv("ADMIN_CLIENT_ID"))
+	adminPassword := strings.TrimSpace(os.Getenv("ADMIN_PASSWORD"))
+	adminSecret := strings.TrimSpace(os.Getenv("ADMIN_SESSION_SECRET"))
+	if adminClientID == "" || adminPassword == "" || adminSecret == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "admin auth is not configured"})
+		return
+	}
+
+	var payload loginPayload
+	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if payload.ClientID != adminClientID || payload.Password != adminPassword {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid admin client id or password"})
+		return
+	}
+
+	token, err := issueAdminToken(adminClientID, adminSecret, 12*time.Hour)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create admin session"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"token": token,
+		"admin": map[string]string{
+			"client_id": adminClientID,
+		},
+	})
+}
+
+func (a *AuthAPI) handleAdminMe(w http.ResponseWriter, r *http.Request) {
+	allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	adminClientID := strings.TrimSpace(os.Getenv("ADMIN_CLIENT_ID"))
+	adminSecret := strings.TrimSpace(os.Getenv("ADMIN_SESSION_SECRET"))
+	if adminClientID == "" || adminSecret == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "admin auth is not configured"})
+		return
+	}
+
+	token := extractBearerToken(r)
+	claims, err := verifyAdminToken(token, adminSecret)
+	if err != nil || claims.ClientID != adminClientID {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"admin": map[string]string{
+			"client_id": claims.ClientID,
+		},
+	})
+}
+
+func (a *AuthAPI) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
+}
+
+func issueAdminToken(clientID, secret string, ttl time.Duration) (string, error) {
+	claims := adminTokenClaims{
+		ClientID:  clientID,
+		ExpiresAt: time.Now().Add(ttl).Unix(),
+	}
+
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+
+	encodedPayload := base64.RawURLEncoding.EncodeToString(payload)
+	signature := signAdminPayload(encodedPayload, secret)
+	return encodedPayload + "." + signature, nil
+}
+
+func verifyAdminToken(token, secret string) (*adminTokenClaims, error) {
+	token = strings.TrimSpace(token)
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid token format")
+	}
+
+	expected := signAdminPayload(parts[0], secret)
+	if !hmac.Equal([]byte(expected), []byte(parts[1])) {
+		return nil, fmt.Errorf("invalid signature")
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, err
+	}
+
+	var claims adminTokenClaims
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil, err
+	}
+
+	if claims.ClientID == "" || time.Now().Unix() > claims.ExpiresAt {
+		return nil, fmt.Errorf("token expired")
+	}
+
+	return &claims, nil
+}
+
+func signAdminPayload(payload, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func generateOTP() (string, error) {

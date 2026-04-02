@@ -1,19 +1,23 @@
 import { useState } from "react"
 
 type AdminLoginPageProps = {
-  onLogin: (clientId: string, password: string) => boolean
+  onLogin: (clientId: string, password: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 export default function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
   const [clientId, setClientId] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  const [submitting, setSubmitting] = useState(false)
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const ok = onLogin(clientId.trim(), password)
-    if (!ok) {
-      setError("Invalid admin credentials. Double-check the client ID and password.")
+    setSubmitting(true)
+    const result = await onLogin(clientId.trim(), password)
+    setSubmitting(false)
+
+    if (!result.ok) {
+      setError(result.error || "Invalid admin credentials. Double-check the client ID and password.")
       return
     }
 
@@ -58,8 +62,8 @@ export default function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
             />
           </label>
 
-          <button type="submit" className="hero-btn primary submit">
-            Enter Admin Dashboard
+          <button type="submit" className="hero-btn primary submit" disabled={submitting}>
+            {submitting ? "Checking access..." : "Enter Admin Dashboard"}
           </button>
 
           {error ? <div className="admin-login-error">{error}</div> : null}

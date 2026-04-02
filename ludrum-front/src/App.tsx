@@ -4,7 +4,7 @@ import AdminDashboard from "./components/AdminDashboard"
 import AdminLoginPage from "./components/AdminLoginPage"
 import MarketClosedScreen from "./components/MarketClosedScreen"
 import OptionTable from "./components/OptionTable"
-import { ADMIN_CLIENT_ID, ADMIN_PASSWORD, ADMIN_SESSION_STORAGE_KEY } from "./config"
+import { ADMIN_SESSION_STORAGE_KEY, API_BASE_URL } from "./config"
 import { initWebSocket } from "./ws/socket"
 
 const MARKET_TIMEZONE = "Asia/Kolkata"
@@ -33,7 +33,8 @@ function isIndianMarketOpen(now: Date) {
 
 export default function App() {
   const [isMarketOpen, setIsMarketOpen] = useState(() => isIndianMarketOpen(new Date()))
-  const [adminAuthenticated, setAdminAuthenticated] = useState(() => window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY) === "active")
+  const [adminAuthState, setAdminAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
+  const [adminClientId, setAdminClientId] = useState("")
   const hostname = window.location.hostname.toLowerCase()
   const isAdminHost = hostname === "admin.ludrum.online" || hostname.startsWith("admin.")
 
@@ -44,6 +45,53 @@ export default function App() {
 
     return () => window.clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    if (!isAdminHost) {
+      setAdminAuthState("idle")
+      setAdminClientId("")
+      return
+    }
+
+    const token = window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY)
+    if (!token) {
+      setAdminAuthState("blocked")
+      return
+    }
+
+    let active = true
+    setAdminAuthState("loading")
+
+    fetch(`${API_BASE_URL}/auth/admin/me`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then(async (response) => {
+        if (!active) return
+        const payload = (await response.json().catch(() => ({}))) as {
+          admin?: { client_id?: string }
+        }
+        if (!response.ok || !payload.admin?.client_id) {
+          window.localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY)
+          setAdminAuthState("blocked")
+          setAdminClientId("")
+          return
+        }
+        setAdminClientId(payload.admin.client_id)
+        setAdminAuthState("ready")
+      })
+      .catch(() => {
+        if (!active) return
+        window.localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY)
+        setAdminAuthState("blocked")
+        setAdminClientId("")
+      })
+
+    return () => {
+      active = false
+    }
+  }, [isAdminHost])
 
   useEffect(() => {
     if (isAdminHost || !isMarketOpen) {
@@ -59,24 +107,78 @@ export default function App() {
     }
   }, [isAdminHost, isMarketOpen])
 
-  function handleAdminLogin(clientId: string, password: string) {
-    const isValid = clientId === ADMIN_CLIENT_ID && password === ADMIN_PASSWORD
-    if (!isValid) {
-      return false
-    }
+  async function handleAdminLogin(clientId: string, password: string) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          password,
+        }),
+      })
 
-    window.localStorage.setItem(ADMIN_SESSION_STORAGE_KEY, "active")
-    setAdminAuthenticated(true)
-    return true
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string
+        token?: string
+        admin?: { client_id?: string }
+      }
+
+      if (!response.ok || !payload.token || !payload.admin?.client_id) {
+        return {
+          ok: false,
+          error: payload.error || "Unable to verify admin access right now.",
+        }
+      }
+
+      window.localStorage.setItem(ADMIN_SESSION_STORAGE_KEY, payload.token)
+      setAdminClientId(payload.admin.client_id)
+      setAdminAuthState("ready")
+      return { ok: true }
+    } catch {
+      return {
+        ok: false,
+        error: "Admin login failed. Check the API and try again.",
+      }
+    }
   }
 
-  function handleAdminLogout() {
+  async function handleAdminLogout() {
+    const token = window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY)
+    if (token) {
+      await fetch(`${API_BASE_URL}/auth/admin/logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }).catch(() => undefined)
+    }
+
     window.localStorage.removeItem(ADMIN_SESSION_STORAGE_KEY)
-    setAdminAuthenticated(false)
+    setAdminClientId("")
+    setAdminAuthState("blocked")
   }
 
   if (isAdminHost) {
-    return adminAuthenticated ? <AdminDashboard onLogout={handleAdminLogout} /> : <AdminLoginPage onLogin={handleAdminLogin} />
+    if (adminAuthState === "loading") {
+      return (
+        <main className="admin-shell">
+          <section className="admin-login-panel">
+            <div className="admin-login-copy">
+              <p className="eyebrow">Admin Console</p>
+              <h1>Checking admin session</h1>
+              <p>Verifying your backend session before opening the operations dashboard.</p>
+            </div>
+          </section>
+        </main>
+      )
+    }
+
+    return adminAuthState === "ready" ? (
+      <AdminDashboard clientId={adminClientId} onLogout={handleAdminLogout} />
+    ) : (
+      <AdminLoginPage onLogin={handleAdminLogin} />
+    )
   }
 
   return isMarketOpen ? <OptionTable /> : <MarketClosedScreen />

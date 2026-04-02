@@ -2,8 +2,6 @@ const defaultApiBaseUrl = "http://localhost:8080"
 const defaultWsUrl = "ws://localhost:8081/ws"
 export const AUTH_TOKEN_STORAGE_KEY = "index-options-auth-token"
 export const ADMIN_SESSION_STORAGE_KEY = "index-options-admin-session"
-export const ADMIN_CLIENT_ID = import.meta.env.VITE_ADMIN_CLIENT_ID || "admin"
-export const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "index-options-admin"
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "")

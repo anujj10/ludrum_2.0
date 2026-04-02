@@ -1,21 +1,40 @@
 type AdminDashboardProps = {
   onLogout: () => void
+  clientId: string
 }
 
 const intakeQueue = [
-  { name: "Rohit Sharma", email: "rohit.trades@gmail.com", phone: "+91 98xxxx1304", style: "Intraday index options", status: "Review" },
-  { name: "Manya Jain", email: "manya.market@outlook.com", phone: "+91 88xxxx4290", style: "Analysis only", status: "Approved" },
-  { name: "Arjun Mehta", email: "arjun.delta@yahoo.com", phone: "+91 97xxxx7712", style: "Short swing options", status: "Pending" },
-]
+  {
+    name: "Rohit Sharma",
+    email: "rohit.trades@gmail.com",
+    phone: "+91 98xxxx1304",
+    style: "Intraday index options",
+    status: "Review",
+  },
+  {
+    name: "Manya Jain",
+    email: "manya.market@outlook.com",
+    phone: "+91 88xxxx4290",
+    style: "Analysis only",
+    status: "Approved",
+  },
+  {
+    name: "Arjun Mehta",
+    email: "arjun.delta@yahoo.com",
+    phone: "+91 97xxxx7712",
+    style: "Short swing options",
+    status: "Pending",
+  },
+] as const
 
 const auditFeed = [
   "New beta request received from Manya Jain.",
   "API domain healthy and serving HTTPS.",
   "Market collector in after-hours standby mode.",
   "Admin subdomain verified and SSL active.",
-]
+] as const
 
-export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
+export default function AdminDashboard({ onLogout, clientId }: AdminDashboardProps) {
   const updatedAt = new Intl.DateTimeFormat("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -35,6 +54,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             <div className="admin-updated-at">
               <span>Last refresh</span>
               <strong>{updatedAt}</strong>
+            </div>
+            <div className="admin-updated-at">
+              <span>Signed in as</span>
+              <strong>{clientId}</strong>
             </div>
             <button type="button" className="hero-btn secondary" onClick={onLogout}>
               Log out
