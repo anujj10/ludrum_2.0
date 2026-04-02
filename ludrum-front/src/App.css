@@ -54,15 +54,14 @@
 }
 
 .status-grid,
-.dashboard-grid,
 .ledger-grid {
   display: grid;
   gap: 14px;
 }
 
 .status-grid {
-  grid-template-columns: repeat(4, minmax(112px, 1fr));
-  min-width: min(560px, 100%);
+  grid-template-columns: repeat(3, minmax(112px, 1fr));
+  min-width: min(420px, 100%);
 }
 
 .status-card,
@@ -95,40 +94,9 @@
   font-size: 1.1rem;
 }
 
-.dashboard-grid {
-  grid-template-columns: 0.9fr 1.1fr;
-  margin-bottom: 18px;
-}
-
-.dashboard-grid.bottom {
-  grid-template-columns: 1.15fr 0.85fr;
-}
-
 .panel {
   border-radius: 22px;
   padding: 20px;
-}
-
-.trade-feedback-panel {
-  margin-bottom: 18px;
-}
-
-.trade-feedback {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.trade-feedback span {
-  color: #8aa0bf;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 0.76rem;
-}
-
-.trade-feedback strong {
-  color: #eff6ff;
 }
 
 .panel-head {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useOptionStore } from "../store/useOptionStore"
 import { API_BASE_URL } from "../config"
-import type { OIChangeEvent, PairSignal, Portfolio, Position, StrikeAnalytics } from "../types/option"
+import type { OIChangeEvent, PairSignal, StrikeAnalytics } from "../types/option"
 
 const STRIKE_STEP = 50
 
@@ -81,15 +81,6 @@ function formatTapeValue(value: number | undefined) {
   }
 
   return `${value}`
-}
-
-function formatTime(unix: number | undefined) {
-  if (!unix) return "-"
-  return new Date(unix * 1000).toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
 }
 
 function toneClass(value: number | undefined) {
@@ -186,103 +177,14 @@ function createEmptyLeg(strike: number, type: "CE" | "PE"): StrikeAnalytics {
   }
 }
 
-function TradeTicket({
-  strike,
-  optionType,
-  price,
-  onFeedback,
-}: {
-  strike: number
-  optionType: "CE" | "PE"
-  price: number | undefined
-  onFeedback: (message: string) => void
-}) {
-  const [lots, setLots] = useState("1")
-  const [sl, setSl] = useState("")
-  const [target, setTarget] = useState("")
-  const [submitting, setSubmitting] = useState(false)
-
-  async function submitTrade(side: "BUY" | "SELL") {
-    const parsedLots = Number(lots)
-    if (!Number.isFinite(parsedLots) || parsedLots <= 0) {
-      onFeedback("Lots must be greater than zero")
-      return
-    }
-
-    setSubmitting(true)
-    try {
-      const response = await fetch(`${API_BASE_URL}/trade`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbol: "NIFTY",
-          strike,
-          optionType,
-          side,
-          lots: parsedLots,
-          SL: sl ? Number(sl) : null,
-          Target: target ? Number(target) : null,
-          EnableSL: Boolean(sl),
-          EnableTarget: Boolean(target),
-        }),
-      })
-
-      const payload = await response.json().catch(() => null)
-      if (!response.ok) {
-        onFeedback(payload?.error || `${side} failed`)
-        return
-      }
-
-      onFeedback(`${side} ${optionType} ${formatNumber(strike, 0)} placed at ${formatNumber(price)}`)
-    } catch {
-      onFeedback("Trade request failed")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <div className="trade-ticket">
-      <div className="ticket-grid">
-        <label className="ticket-field">
-          <span>Lots</span>
-          <input value={lots} onChange={(event) => setLots(event.target.value)} inputMode="numeric" />
-        </label>
-        <label className="ticket-field">
-          <span>SL (pts)</span>
-          <input value={sl} onChange={(event) => setSl(event.target.value)} inputMode="decimal" />
-        </label>
-        <label className="ticket-field">
-          <span>Target (pts)</span>
-          <input value={target} onChange={(event) => setTarget(event.target.value)} inputMode="decimal" />
-        </label>
-      </div>
-      <div className="ticket-actions">
-        <button type="button" className="trade-btn buy" disabled={submitting} onClick={() => submitTrade("BUY")}>
-          Buy
-        </button>
-        <button type="button" className="trade-btn sell" disabled={submitting} onClick={() => submitTrade("SELL")}>
-          Sell
-        </button>
-      </div>
-    </div>
-  )
-}
-
 function OptionLegCell({
   leg,
   history,
   align,
-  strike,
-  optionType,
-  onFeedback,
 }: {
   leg: StrikeAnalytics
   history: OIChangeEntry[]
   align: "left" | "right"
-  strike: number
-  optionType: "CE" | "PE"
-  onFeedback: (message: string) => void
 }) {
   const latestLtp = leg.LTPSeries?.[leg.LTPSeries.length - 1]
 
@@ -319,35 +221,7 @@ function OptionLegCell({
           <OISeriesValues series={history} align={align} />
         </div>
       </div>
-
-      <TradeTicket strike={strike} optionType={optionType} price={latestLtp} onFeedback={onFeedback} />
     </div>
-  )
-}
-
-function PositionRow({
-  position,
-  onExit,
-}: {
-  position: Position
-  onExit: (position: Position) => Promise<void>
-}) {
-  return (
-    <tr>
-      <td>{position.Symbol || "NIFTY"}</td>
-      <td>{position.OptionType}</td>
-      <td>{formatNumber(position.Strike, 0)}</td>
-      <td>{position.Side}</td>
-      <td>{position.Qty}</td>
-      <td>{formatNumber(position.AvgPrice)}</td>
-      <td className={toneClass(position.UnrealizedPnL)}>{formatNumber(position.UnrealizedPnL)}</td>
-      <td>{formatTime(position.LastUpdate || position.EntryTime)}</td>
-      <td>
-        <button type="button" className="exit-btn" onClick={() => void onExit(position)}>
-          Exit
-        </button>
-      </td>
-    </tr>
   )
 }
 
@@ -356,13 +230,11 @@ function ChainRow({
   strike,
   spot,
   history,
-  onFeedback,
 }: {
   pair?: PairSignal
   strike: number
   spot: number
   history?: { CE: OIChangeEntry[]; PE: OIChangeEntry[] }
-  onFeedback: (message: string) => void
 }) {
   const resolvedHistory = history ?? { CE: [], PE: [] }
   const resolvedPair =
@@ -382,14 +254,7 @@ function ChainRow({
   return (
     <tr>
       <td className="chain-leg">
-        <OptionLegCell
-          leg={resolvedPair.CE}
-          history={resolvedHistory.CE}
-          align="left"
-          strike={strike}
-          optionType="CE"
-          onFeedback={onFeedback}
-        />
+        <OptionLegCell leg={resolvedPair.CE} history={resolvedHistory.CE} align="left" />
       </td>
       <td className="chain-strike">
         <div className={`strike-chip ${distanceClass}`}>
@@ -398,14 +263,7 @@ function ChainRow({
         </div>
       </td>
       <td className="chain-leg">
-        <OptionLegCell
-          leg={resolvedPair.PE}
-          history={resolvedHistory.PE}
-          align="right"
-          strike={strike}
-          optionType="PE"
-          onFeedback={onFeedback}
-        />
+        <OptionLegCell leg={resolvedPair.PE} history={resolvedHistory.PE} align="right" />
       </td>
     </tr>
   )
@@ -431,15 +289,11 @@ function SpotRow({ spot }: { spot: number }) {
 }
 
 export default function OptionTable() {
-  const [tradeMessage, setTradeMessage] = useState("")
   const [oiHistoryMap, setOIHistoryMap] = useState<OIHistoryMap>({})
   const [runtimeOIHistoryMap, setRuntimeOIHistoryMap] = useState<OIHistoryMap>({})
   const hydrate = useOptionStore((state) => state.hydrate)
   const strikeMap = useOptionStore((state) => state.strikeMap)
   const spot = useOptionStore((state) => state.spot)
-  const portfolio = useOptionStore((state) => state.portfolio)
-  const openPositions = useOptionStore((state) => state.openPositions)
-  const closedPositions = useOptionStore((state) => state.closedPositions)
   const lastType = useOptionStore((state) => state.lastType)
 
   const rows = Object.values(strikeMap).sort((a, b) => a.Strike - b.Strike)
@@ -467,33 +321,16 @@ export default function OptionTable() {
 
     async function hydrateFromHttp() {
       try {
-        const [pairsResponse, positionsResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/pairs`),
-          fetch(`${API_BASE_URL}/positions`),
-        ])
-
-        const nextState: {
-          pairs?: PairSignal[]
-          open_positions?: Position[]
-          portfolio?: Portfolio
-        } = {}
+        const pairsResponse = await fetch(`${API_BASE_URL}/pairs`)
+        const nextState: { pairs?: PairSignal[] } = {}
 
         if (pairsResponse.ok) {
           nextState.pairs = (await pairsResponse.json()) as PairSignal[]
         }
 
-        if (positionsResponse.ok) {
-          const positionsPayload = (await positionsResponse.json()) as {
-            positions?: Position[]
-            portfolio?: Portfolio
-          }
-          nextState.open_positions = positionsPayload.positions
-          nextState.portfolio = positionsPayload.portfolio
-        }
-
         if (!active) return
 
-        if (nextState.pairs?.length || nextState.open_positions || nextState.portfolio) {
+        if (nextState.pairs?.length) {
           hydrate(nextState, "snapshot")
         }
       } catch {
@@ -577,29 +414,6 @@ export default function OptionTable() {
     })
   }, [displayStrikes.join(","), strikeMap])
 
-  async function handleExit(position: Position) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/exit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          strike: position.Strike,
-          optionType: position.OptionType,
-        }),
-      })
-
-      const payload = await response.json().catch(() => null)
-      if (!response.ok) {
-        setTradeMessage(payload?.error || "Exit failed")
-        return
-      }
-
-      setTradeMessage(`Exited ${position.OptionType} ${formatNumber(position.Strike, 0)}`)
-    } catch {
-      setTradeMessage("Exit request failed")
-    }
-  }
-
   return (
     <div className="terminal-shell">
       <header className="topbar">
@@ -620,97 +434,8 @@ export default function OptionTable() {
             <span>ATM</span>
             <strong>{atm ? formatNumber(atm.Strike, 0) : "-"}</strong>
           </div>
-          <div className="status-card">
-            <span>Open Trades</span>
-            <strong>{openPositions.length}</strong>
-          </div>
         </div>
       </header>
-
-      {tradeMessage ? (
-        <section className="panel trade-feedback-panel">
-          <div className="trade-feedback">
-            <span>Paper trade status</span>
-            <strong>{tradeMessage}</strong>
-          </div>
-        </section>
-      ) : null}
-
-      <section className="dashboard-grid">
-        <article className="panel">
-          <div className="panel-head">
-            <h2>Capital</h2>
-            <span>Simulator ledger</span>
-          </div>
-          <div className="ledger-grid">
-            <div>
-              <span>Initial</span>
-              <strong>{formatNumber(portfolio?.InitialCapital)}</strong>
-            </div>
-            <div>
-              <span>Available</span>
-              <strong>{formatNumber(portfolio?.AvailableCapital)}</strong>
-            </div>
-            <div>
-              <span>Used Margin</span>
-              <strong>{formatNumber(portfolio?.UsedMargin)}</strong>
-            </div>
-            <div>
-              <span>Realized</span>
-              <strong className={toneClass(portfolio?.RealizedPnL)}>
-                {formatNumber(portfolio?.RealizedPnL)}
-              </strong>
-            </div>
-            <div>
-              <span>Unrealized</span>
-              <strong className={toneClass(portfolio?.UnrealizedPnL)}>
-                {formatNumber(portfolio?.UnrealizedPnL)}
-              </strong>
-            </div>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-head">
-            <h2>Position Blotter</h2>
-            <span>{openPositions.length ? "Live exposure" : "No active positions"}</span>
-          </div>
-          <div className="table-wrap">
-            <table className="mini-table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Type</th>
-                  <th>Strike</th>
-                  <th>Side</th>
-                  <th>Qty</th>
-                  <th>Avg</th>
-                  <th>uPnL</th>
-                  <th>Time</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {openPositions.length ? (
-                  openPositions.map((position, index) => (
-                    <PositionRow
-                      key={`${position.Strike}-${position.OptionType}-${index}`}
-                      position={position}
-                      onExit={handleExit}
-                    />
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={9} className="empty-cell">
-                      Waiting for simulator entries...
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
 
       <section className="panel chain-panel">
         <div className="panel-head">
@@ -740,7 +465,6 @@ export default function OptionTable() {
                           pair={strikeMap[strike]}
                           spot={spot}
                           history={mergedOIHistoryMap[strike]}
-                          onFeedback={setTradeMessage}
                         />
                       ))}
                     <SpotRow spot={spot} />
@@ -754,7 +478,6 @@ export default function OptionTable() {
                           pair={strikeMap[strike]}
                           spot={spot}
                           history={mergedOIHistoryMap[strike]}
-                          onFeedback={setTradeMessage}
                         />
                       ))}
                   </>
@@ -766,7 +489,6 @@ export default function OptionTable() {
                       pair={strikeMap[strike]}
                       spot={spot}
                       history={mergedOIHistoryMap[strike]}
-                      onFeedback={setTradeMessage}
                     />
                   ))
                 )}
@@ -776,64 +498,9 @@ export default function OptionTable() {
         ) : (
           <div className="empty-state">
             <p>Waiting for the backend snapshot from {API_BASE_URL} and the configured websocket feed.</p>
-            <p>The UI is now wired to `spot`, `pairs`, `open_positions`, `closed_positions`, and `portfolio`.</p>
+            <p>The UI is now wired to `spot` and `pairs` for a read-only live market view.</p>
           </div>
         )}
-      </section>
-
-      <section className="dashboard-grid bottom">
-        <article className="panel">
-          <div className="panel-head">
-            <h2>Closed Trades</h2>
-            <span>{closedPositions.length} archived fills</span>
-          </div>
-          <div className="table-wrap">
-            <table className="mini-table">
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>Strike</th>
-                  <th>Side</th>
-                  <th>Qty</th>
-                  <th>Realized</th>
-                  <th>Exit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {closedPositions.length ? (
-                  closedPositions.slice(-6).reverse().map((position, index) => (
-                    <tr key={`${position.Strike}-${position.OptionType}-${index}`}>
-                      <td>{position.OptionType}</td>
-                      <td>{formatNumber(position.Strike, 0)}</td>
-                      <td>{position.Side}</td>
-                      <td>{position.Qty}</td>
-                      <td className={toneClass(position.RealizedPnL)}>{formatNumber(position.RealizedPnL)}</td>
-                      <td>{formatTime(position.LastUpdate || position.EntryTime)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={6} className="empty-cell">
-                      No closed positions yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-head">
-            <h2>Terminal Notes</h2>
-            <span>Backend-driven fields</span>
-          </div>
-          <div className="notes">
-            <p>`PairSignal.Strike`, `CE`, `PE`, `Bias`, `Score`, and `Strength` drive the chain rows.</p>
-            <p>`StrikeAnalytics` powers LTP series, OI change, current OI, velocity, acceleration, and signal badges.</p>
-            <p>`portfolio`, `open_positions`, and `closed_positions` populate the blotter and ledger without mock data.</p>
-          </div>
-        </article>
       </section>
     </div>
   )
