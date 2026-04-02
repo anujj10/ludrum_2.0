@@ -1,0 +1,42 @@
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: infra/docker/DockerFile
+    env_file:
+      - ../../.env
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: password
+      DB_NAME: ludrum
+      REDIS_ADDR: redis:6379
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    depends_on:
+      - redis
+      - timescaledb
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    container_name: ludrum_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ludrum
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

@@ -1,0 +1,9 @@
+created_at=20260331-180409
+database=ludrum
+host=localhost
+port=5432
+dump_file=.\\backups\ludrum-20260331-180409.dump
+log_file=.\\backups\\logs\backup-20260331-180409.log
+market_snapshots=2808
+option_chain=0
+option_features=0

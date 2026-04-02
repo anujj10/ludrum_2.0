@@ -1,0 +1,23 @@
+FROM alpine:latest AS builder
+
+WORKDIR /src
+
+RUN apk add --no-cache go git build-base ca-certificates
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG APP_PATH=./apps/market-collector/live
+RUN go build -o /out/app ${APP_PATH}
+
+FROM alpine:latest
+
+WORKDIR /root/
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /out/app ./app
+COPY --from=builder /root/go/pkg/mod/github.com/!fyers!dev/fyers-go-sdk@v1.1.0/websocket/map.json /root/go/pkg/mod/github.com/!fyers!dev/fyers-go-sdk@v1.1.0/websocket/map.json
+
+CMD ["./app"]

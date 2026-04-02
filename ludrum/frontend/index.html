@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ludrum Terminal</title>
+    <style>
+        body {
+            background: #0d1117;
+            color: #c9d1d9;
+            font-family: monospace;
+            padding: 20px;
+        }
+
+        h2 {
+            margin-top: 30px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 8px;
+            text-align: center;
+        }
+
+        tr {
+            transition: all 0.2s ease;
+        }
+
+        tr:hover {
+            background: #161b22;
+        }
+
+        .bullish { color: #00ff9c; }
+        .bearish { color: #ff4d4d; }
+        .neutral { color: #999; }
+
+        .positive { color: #00ff9c; }
+        .negative { color: #ff4d4d; }
+
+        .card {
+            background: #161b22;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1> Ludrum Terminal</h1>
+<h2>Spot: <span id="spot">0</span></h2>
+
+<div class="card">
+    <h2>Signals</h2>
+<table id="signals">
+<tr>
+    <th>Strike</th>
+
+    <th>CE LTP</th>
+    <th>CE OI</th>
+    <th>CE </th>
+    <th>CE Pattern</th>
+    <th>CE Vol</th>
+    <th>CE OI</th>
+
+    <th>PE LTP</th>
+    <th>PE OI</th>
+    <th>PE </th>
+    <th>PE Pattern</th>
+    <th>PE Vol</th>
+    <th>PE OI</th>
+</tr>
+</table>
+</div>
+
+<div class="card">
+    <h2>Trades</h2>
+    <table id="trades">
+        <tr>
+            <th>Strike</th>
+            <th>Type</th>
+            <th>Entry</th>
+            <th>Current</th>
+            <th>PnL</th>
+        </tr>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Total PnL: <span id="pnl">0</span></h2>
+</div>
+
+<script>
+let signalMap = {};
+const ws = new WebSocket("ws://localhost:8081/ws");
+
+// ================= WS =================
+ws.onmessage = (event) => {
+    let payload;
+
+    try {
+        payload = JSON.parse(event.data);
+    } catch {
+        return;
+    }
+
+    if (!payload) return;
+
+    // ✅ SAFE GUARDS
+    const pairs = payload.Pairs || [];
+    const trades = payload.Trades || [];
+    const pnl = payload.PnL || 0;
+
+    pairs.forEach(p => {
+        if (!p || !p.Strike) return;
+        signalMap[p.Strike] = p;
+    });
+
+    renderSignals();
+    renderTrades(trades);
+    updatePnL(pnl);
+
+    if (payload.Spot) {
+        document.getElementById("spot").innerText = payload.Spot.toFixed(2);
+    }
+};
+
+// ================= RENDER =================
+function renderSignals() {
+    const table = document.getElementById("signals");
+
+    table.innerHTML = `
+        <tr>
+            <th>Strike</th>
+
+            <th>CE LTP</th>
+            <th>CE VolΔ</th>
+            <th>CE OI</th>
+            <th>CE OI Δ</th>
+
+            <th>PE LTP</th>
+            <th>PE VolΔ</th>
+            <th>PE OI</th>
+            <th>PE OI Δ</th>
+        </tr>
+    `;
+
+    const strikes = Object.values(signalMap);
+    if (strikes.length === 0) return;
+
+    const sorted = strikes.sort((a, b) => a.Strike - b.Strike);
+    const atm = sorted[Math.floor(sorted.length / 2)].Strike;
+
+    const filtered = sorted.filter(p => Math.abs(p.Strike - atm) <= 100);
+
+    filtered.forEach(p => {
+        const row = document.createElement("tr");
+
+        const ceLTP = p.CE.LTPSeries?.slice(-5).map(x => x.toFixed(1)).join(", ") || "";
+        const peLTP = p.PE.LTPSeries?.slice(-5).map(x => x.toFixed(1)).join(", ") || "";
+
+        row.innerHTML = `
+            <td>${p.Strike}</td>
+
+            <td>${ceLTP}</td>
+            <td>${p.CE.VolumeChange}</td>
+            <td>${p.CE.CurrentOI ?? 0}</td>
+            <td>${p.CE.OIChange}</td>
+
+            <td>${peLTP}</td>
+            <td>${p.PE.VolumeChange}</td>
+            <td>${p.PE.CurrentOI ?? 0}</td>
+            <td>${p.PE.OIChange}</td>
+        `;
+
+        table.appendChild(row);
+    });
+}
+
+function renderTrades(trades) {
+    const table = document.getElementById("trades");
+
+    table.innerHTML = `
+        <tr>
+            <th>Strike</th>
+            <th>Type</th>
+            <th>Entry</th>
+            <th>Current</th>
+            <th>PnL</th>
+        </tr>
+    `;
+
+    trades.forEach(t => {
+        const row = document.createElement("tr");
+
+        const pnlClass = t.PnL >= 0 ? "positive" : "negative";
+
+        row.innerHTML = `
+            <td>${t.Strike}</td>
+            <td>${t.Type}</td>
+            <td>${t.EntryPrice.toFixed(2)}</td>
+            <td>${t.Current.toFixed(2)}</td>
+            <td class="${pnlClass}">${t.PnL.toFixed(2)}</td>
+        `;
+
+        table.appendChild(row);
+    });
+}
+
+function updatePnL(pnl) {
+    document.getElementById("pnl").innerText = pnl.toFixed(2);
+}
+</script>
+
+</body>
+</html>
