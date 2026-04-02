@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react"
 import "./App.css"
+import HomePage from "./components/HomePage"
+import LoginPage from "./components/LoginPage"
 import MarketClosedScreen from "./components/MarketClosedScreen"
 import OptionTable from "./components/OptionTable"
 import { initWebSocket } from "./ws/socket"
@@ -30,6 +32,10 @@ function isIndianMarketOpen(now: Date) {
 
 export default function App() {
   const [isMarketOpen, setIsMarketOpen] = useState(() => isIndianMarketOpen(new Date()))
+  const pathname = window.location.pathname.replace(/\/+$/, "") || "/"
+
+  const isTerminalRoute = pathname === "/terminal"
+  const isLoginRoute = pathname === "/login"
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -40,7 +46,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!isMarketOpen) {
+    if (!isMarketOpen || !isTerminalRoute) {
       return
     }
 
@@ -51,7 +57,15 @@ export default function App() {
         ws.close()
       }
     }
-  }, [isMarketOpen])
+  }, [isMarketOpen, isTerminalRoute])
+
+  if (isLoginRoute) {
+    return <LoginPage />
+  }
+
+  if (!isTerminalRoute) {
+    return <HomePage />
+  }
 
   return isMarketOpen ? <OptionTable /> : <MarketClosedScreen />
 }
