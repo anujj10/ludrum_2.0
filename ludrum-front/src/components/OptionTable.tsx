@@ -13,7 +13,7 @@ type OIChangeEntry = {
 type OIHistoryMap = Record<number, { CE: OIChangeEntry[]; PE: OIChangeEntry[] }>
 
 function appendOIHistoryEntry(entries: OIChangeEntry[] | undefined, value: number | undefined) {
-  if (value === undefined || value === null || Number.isNaN(value)) {
+  if (value === undefined || value === null || Number.isNaN(value) || value === 0) {
     return entries ?? []
   }
 
@@ -42,8 +42,8 @@ function mergeOIHistoryMaps(apiHistory: OIHistoryMap, runtimeHistory: OIHistoryM
     const existing = merged[strike] ?? { CE: [], PE: [] }
 
     merged[strike] = {
-      CE: runtimeEntry.CE.length ? runtimeEntry.CE : existing.CE,
-      PE: runtimeEntry.PE.length ? runtimeEntry.PE : existing.PE,
+      CE: existing.CE.length ? existing.CE : runtimeEntry.CE,
+      PE: existing.PE.length ? existing.PE : runtimeEntry.PE,
     }
   }
 
