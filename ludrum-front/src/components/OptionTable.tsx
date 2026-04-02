@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useOptionStore } from "../store/useOptionStore"
-import { API_BASE_URL } from "../config"
+import { API_BASE_URL, authHeaders } from "../config"
 import type { OIChangeEvent, PairSignal, StrikeAnalytics } from "../types/option"
 
 const STRIKE_STEP = 50
@@ -321,7 +321,9 @@ export default function OptionTable() {
 
     async function hydrateFromHttp() {
       try {
-        const pairsResponse = await fetch(`${API_BASE_URL}/pairs`)
+        const pairsResponse = await fetch(`${API_BASE_URL}/pairs`, {
+          headers: authHeaders(),
+        })
         const nextState: { pairs?: PairSignal[] } = {}
 
         if (pairsResponse.ok) {
@@ -364,7 +366,9 @@ export default function OptionTable() {
           strikes: displayStrikes.join(","),
           limit: "12",
         })
-        const response = await fetch(`${API_BASE_URL}/oi-events?${params.toString()}`)
+        const response = await fetch(`${API_BASE_URL}/oi-events?${params.toString()}`, {
+          headers: authHeaders(),
+        })
         if (!response.ok) return
 
         const payload = (await response.json()) as OIChangeEvent[]

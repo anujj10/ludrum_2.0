@@ -914,10 +914,30 @@ a {
   color: var(--text-primary);
 }
 
+.beta-result,
+.login-message {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border-soft);
+  background: rgba(22, 20, 18, 0.92);
+  color: var(--text-secondary);
+}
+
+.beta-result strong,
+.login-message {
+  color: var(--text-primary);
+}
+
 .back-link {
   display: inline-flex;
   margin-bottom: 16px;
   font-size: 0.92rem;
+}
+
+.auth-loading-panel {
+  padding: 28px;
 }
 
 @keyframes marketPulse {

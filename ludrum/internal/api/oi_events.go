@@ -29,6 +29,11 @@ func handleOIEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, err := authorizeRequest(r); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return

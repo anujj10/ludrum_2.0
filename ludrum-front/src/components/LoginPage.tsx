@@ -1,7 +1,84 @@
 import { useState } from "react"
 
+import { API_BASE_URL, AUTH_TOKEN_STORAGE_KEY } from "../config"
+
 export default function LoginPage() {
   const [step, setStep] = useState<"credentials" | "otp">("credentials")
+  const [clientId, setClientId] = useState("")
+  const [password, setPassword] = useState("")
+  const [otp, setOTP] = useState("")
+  const [message, setMessage] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleCredentialsSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setMessage("")
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          password,
+        }),
+      })
+
+      const payload = (await response.json()) as {
+        error?: string
+        message?: string
+        otp_preview?: string
+        warning?: string
+      }
+
+      if (!response.ok) {
+        setMessage(payload.error || "Unable to continue")
+        return
+      }
+
+      setStep("otp")
+      setMessage(payload.warning ? `${payload.message} ${payload.warning}${payload.otp_preview ? ` OTP: ${payload.otp_preview}` : ""}` : payload.message || "OTP sent")
+    } catch {
+      setMessage("Login request failed")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleOTPSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setMessage("")
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          otp,
+        }),
+      })
+
+      const payload = (await response.json()) as {
+        error?: string
+        token?: string
+      }
+
+      if (!response.ok || !payload.token) {
+        setMessage(payload.error || "OTP verification failed")
+        return
+      }
+
+      window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, payload.token)
+      window.location.href = "/terminal"
+    } catch {
+      setMessage("OTP verification failed")
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <main className="login-shell">
@@ -25,45 +102,46 @@ export default function LoginPage() {
           </div>
 
           {step === "credentials" ? (
-            <form
-              className="login-form"
-              onSubmit={(event) => {
-                event.preventDefault()
-                setStep("otp")
-              }}
-            >
+            <form className="login-form" onSubmit={handleCredentialsSubmit}>
               <label>
                 <span>Client ID</span>
-                <input type="text" placeholder="IDX-10284" />
+                <input type="text" placeholder="IDX-10284" value={clientId} onChange={(event) => setClientId(event.target.value)} />
               </label>
               <label>
                 <span>Password</span>
-                <input type="password" placeholder="Enter your password" />
+                <input
+                  type="password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
               </label>
-              <button type="submit" className="hero-btn primary submit">
-                Continue to OTP
+              <button type="submit" className="hero-btn primary submit" disabled={submitting}>
+                {submitting ? "Checking..." : "Continue to OTP"}
               </button>
             </form>
           ) : (
-            <form className="login-form">
+            <form className="login-form" onSubmit={handleOTPSubmit}>
               <label>
                 <span>Email OTP</span>
-                <input type="text" inputMode="numeric" placeholder="Enter 6-digit code" />
+                <input type="text" inputMode="numeric" placeholder="Enter 6-digit code" value={otp} onChange={(event) => setOTP(event.target.value)} />
               </label>
               <div className="otp-actions">
                 <button type="button" className="hero-btn secondary" onClick={() => setStep("credentials")}>
                   Change credentials
                 </button>
-                <button type="button" className="hero-btn primary submit">
-                  Verify & Enter
+                <button type="submit" className="hero-btn primary submit" disabled={submitting}>
+                  {submitting ? "Verifying..." : "Verify & Enter"}
                 </button>
               </div>
             </form>
           )}
 
+          {message ? <div className="login-message">{message}</div> : null}
+
           <div className="login-note">
             <strong>Current scope</strong>
-            <span>This page is ready for real auth wiring next: credential lookup, email OTP send, OTP verify, and session creation.</span>
+            <span>This flow now submits credentials, sends OTP, verifies the code, and stores a terminal session token for market access.</span>
           </div>
         </div>
       </section>

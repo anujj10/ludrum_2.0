@@ -1,5 +1,5 @@
 import { useOptionStore } from "../store/useOptionStore"
-import { WS_URL } from "../config"
+import { buildAuthedWsUrl } from "../config"
 import type { StreamMessage } from "../types/option"
 
 let socket: WebSocket | null = null
@@ -12,7 +12,7 @@ export function initWebSocket() {
     return socket
   }
 
-  socket = new WebSocket(WS_URL)
+  socket = new WebSocket(buildAuthedWsUrl())
 
   socket.onopen = () => {
     console.log("WS connected")

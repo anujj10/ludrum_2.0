@@ -2,8 +2,8 @@ package api
 
 import (
 	"encoding/json"
-	"net/http"
 	"ludrum/internal/cache"
+	"net/http"
 )
 
 type Server struct {
@@ -21,6 +21,17 @@ func (s *Server) Start() {
 }
 
 func (s *Server) handlePairs(w http.ResponseWriter, r *http.Request) {
+	allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if _, err := authorizeRequest(r); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
 	data := s.State.GetAllPairs()
 
 	w.Header().Set("Content-Type", "application/json")

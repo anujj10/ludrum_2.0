@@ -121,6 +121,11 @@ func StartWS(redisClient *redis.RedisClient, port string) {
 	go startRedisSubscriber(redisClient, hub, prefix+":delta")
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := authorizeRequest(r); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println("upgrade error:", err)

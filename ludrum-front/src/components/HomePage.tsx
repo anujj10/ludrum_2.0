@@ -19,6 +19,61 @@ const featureCards = [
 ]
 
 export default function HomePage() {
+  const [form, setForm] = useState({
+    full_name: "",
+    email: "",
+    phone: "",
+    trading_style: "intraday",
+  })
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<null | {
+    message: string
+    delivery?: string
+    client_id?: string
+    password?: string
+    warning?: string
+  }>(null)
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setResult(null)
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/beta-request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      })
+
+      const payload = (await response.json()) as {
+        message?: string
+        delivery?: string
+        client_id?: string
+        password?: string
+        warning?: string
+        error?: string
+      }
+
+      if (!response.ok) {
+        setResult({ message: payload.error || "Request failed" })
+        return
+      }
+
+      setResult({
+        message: payload.message || "Request submitted",
+        delivery: payload.delivery,
+        client_id: payload.client_id,
+        password: payload.password,
+        warning: payload.warning,
+      })
+    } catch {
+      setResult({ message: "Unable to submit beta request right now." })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <main className="marketing-shell">
       <section className="hero-panel">
@@ -106,32 +161,62 @@ export default function HomePage() {
           </p>
         </div>
 
-        <form className="beta-form">
+        <form className="beta-form" onSubmit={handleSubmit}>
           <label>
             <span>Full name</span>
-            <input type="text" placeholder="Your name" />
+            <input
+              type="text"
+              placeholder="Your name"
+              value={form.full_name}
+              onChange={(event) => setForm((current) => ({ ...current, full_name: event.target.value }))}
+            />
           </label>
           <label>
             <span>Email address</span>
-            <input type="email" placeholder="you@example.com" />
+            <input
+              type="email"
+              placeholder="you@example.com"
+              value={form.email}
+              onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+            />
           </label>
           <label>
             <span>Phone number</span>
-            <input type="tel" placeholder="+91 98xxxxxx10" />
+            <input
+              type="tel"
+              placeholder="+91 98xxxxxx10"
+              value={form.phone}
+              onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+            />
           </label>
           <label>
             <span>Trading style</span>
-            <select defaultValue="intraday">
+            <select
+              value={form.trading_style}
+              onChange={(event) => setForm((current) => ({ ...current, trading_style: event.target.value }))}
+            >
               <option value="intraday">Intraday index options</option>
               <option value="swing">Short swing options</option>
               <option value="analysis">Market analysis only</option>
             </select>
           </label>
-          <button type="button" className="hero-btn primary submit">
-            Request Beta Access
+          <button type="submit" className="hero-btn primary submit" disabled={submitting}>
+            {submitting ? "Submitting..." : "Request Beta Access"}
           </button>
+          {result ? (
+            <div className="beta-result">
+              <strong>{result.message}</strong>
+              {result.delivery ? <span>Delivery: {result.delivery}</span> : null}
+              {result.warning ? <span>{result.warning}</span> : null}
+              {result.client_id ? <span>Client ID: {result.client_id}</span> : null}
+              {result.password ? <span>Password: {result.password}</span> : null}
+            </div>
+          ) : null}
         </form>
       </section>
     </main>
   )
 }
+import { useState } from "react"
+
+import { API_BASE_URL } from "../config"

@@ -119,6 +119,37 @@ func ensureTimescaleTables() {
 			ltp_change DOUBLE PRECISION
 		)`,
 		`SELECT create_hypertable('option_oi_change_events', 'time', if_not_exists => TRUE)`,
+		`CREATE TABLE IF NOT EXISTS beta_users (
+			id BIGSERIAL PRIMARY KEY,
+			full_name TEXT NOT NULL,
+			email TEXT NOT NULL UNIQUE,
+			phone TEXT NOT NULL UNIQUE,
+			trading_style TEXT,
+			client_id TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_credential_sent_at TIMESTAMPTZ
+		)`,
+		`CREATE TABLE IF NOT EXISTS email_otp_codes (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT NOT NULL REFERENCES beta_users(id) ON DELETE CASCADE,
+			code_hash TEXT NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			consumed_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_email_otp_codes_user_id_created_at ON email_otp_codes(user_id, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS auth_sessions (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT NOT NULL REFERENCES beta_users(id) ON DELETE CASCADE,
+			token_hash TEXT NOT NULL UNIQUE,
+			expires_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at)`,
 	}
 
 	for _, statement := range statements {

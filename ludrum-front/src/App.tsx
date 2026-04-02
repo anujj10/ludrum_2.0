@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import "./App.css"
+import { API_BASE_URL, AUTH_TOKEN_STORAGE_KEY, authHeaders } from "./config"
 import HomePage from "./components/HomePage"
 import LoginPage from "./components/LoginPage"
 import MarketClosedScreen from "./components/MarketClosedScreen"
@@ -32,6 +33,7 @@ function isIndianMarketOpen(now: Date) {
 
 export default function App() {
   const [isMarketOpen, setIsMarketOpen] = useState(() => isIndianMarketOpen(new Date()))
+  const [authState, setAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
   const pathname = window.location.pathname.replace(/\/+$/, "") || "/"
 
   const isTerminalRoute = pathname === "/terminal"
@@ -46,7 +48,45 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!isMarketOpen || !isTerminalRoute) {
+    if (!isTerminalRoute) {
+      setAuthState("idle")
+      return
+    }
+
+    const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
+    if (!token) {
+      setAuthState("blocked")
+      return
+    }
+
+    let active = true
+    setAuthState("loading")
+
+    fetch(`${API_BASE_URL}/auth/me`, {
+      headers: authHeaders(),
+    })
+      .then(async (response) => {
+        if (!active) return
+        if (!response.ok) {
+          window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+          setAuthState("blocked")
+          return
+        }
+        setAuthState("ready")
+      })
+      .catch(() => {
+        if (active) {
+          setAuthState("blocked")
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [isTerminalRoute])
+
+  useEffect(() => {
+    if (!isMarketOpen || !isTerminalRoute || authState !== "ready") {
       return
     }
 
@@ -57,7 +97,7 @@ export default function App() {
         ws.close()
       }
     }
-  }, [isMarketOpen, isTerminalRoute])
+  }, [authState, isMarketOpen, isTerminalRoute])
 
   if (isLoginRoute) {
     return <LoginPage />
@@ -65,6 +105,24 @@ export default function App() {
 
   if (!isTerminalRoute) {
     return <HomePage />
+  }
+
+  if (authState === "loading") {
+    return (
+      <main className="login-shell">
+        <section className="login-panel auth-loading-panel">
+          <div className="login-brand">
+            <p className="eyebrow">Private Access</p>
+            <h1>Checking session</h1>
+            <p>Verifying your terminal access before loading the live market board.</p>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (authState !== "ready") {
+    return <LoginPage />
   }
 
   return isMarketOpen ? <OptionTable /> : <MarketClosedScreen />
