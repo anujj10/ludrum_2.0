@@ -12,6 +12,44 @@ type OIChangeEntry = {
 
 type OIHistoryMap = Record<number, { CE: OIChangeEntry[]; PE: OIChangeEntry[] }>
 
+function appendOIHistoryEntry(entries: OIChangeEntry[] | undefined, value: number | undefined) {
+  if (value === undefined || value === null || Number.isNaN(value)) {
+    return entries ?? []
+  }
+
+  const nextEntry = {
+    value,
+    time: formatEventTime(new Date().toISOString()),
+  }
+
+  if (!entries?.length) {
+    return [nextEntry]
+  }
+
+  const lastEntry = entries[entries.length - 1]
+  if (lastEntry.value === value) {
+    return entries
+  }
+
+  return [...entries.slice(-11), nextEntry]
+}
+
+function mergeOIHistoryMaps(apiHistory: OIHistoryMap, runtimeHistory: OIHistoryMap) {
+  const merged: OIHistoryMap = { ...apiHistory }
+
+  for (const [rawStrike, runtimeEntry] of Object.entries(runtimeHistory)) {
+    const strike = Number(rawStrike)
+    const existing = merged[strike] ?? { CE: [], PE: [] }
+
+    merged[strike] = {
+      CE: runtimeEntry.CE.length ? runtimeEntry.CE : existing.CE,
+      PE: runtimeEntry.PE.length ? runtimeEntry.PE : existing.PE,
+    }
+  }
+
+  return merged
+}
+
 function formatNumber(value: number | undefined, digits = 2) {
   if (value === undefined || value === null || Number.isNaN(value)) return "-"
   return new Intl.NumberFormat("en-IN", {
@@ -395,6 +433,7 @@ function SpotRow({ spot }: { spot: number }) {
 export default function OptionTable() {
   const [tradeMessage, setTradeMessage] = useState("")
   const [oiHistoryMap, setOIHistoryMap] = useState<OIHistoryMap>({})
+  const [runtimeOIHistoryMap, setRuntimeOIHistoryMap] = useState<OIHistoryMap>({})
   const hydrate = useOptionStore((state) => state.hydrate)
   const strikeMap = useOptionStore((state) => state.strikeMap)
   const spot = useOptionStore((state) => state.spot)
@@ -421,6 +460,7 @@ export default function OptionTable() {
     if (!closest) return pair
     return Math.abs(pair.Strike - spot) < Math.abs(closest.Strike - spot) ? pair : closest
   }, null)
+  const mergedOIHistoryMap = mergeOIHistoryMaps(oiHistoryMap, runtimeOIHistoryMap)
 
   useEffect(() => {
     let active = true
@@ -511,6 +551,31 @@ export default function OptionTable() {
       window.clearInterval(interval)
     }
   }, [displayStrikes.join(",")])
+
+  useEffect(() => {
+    if (!displayStrikes.length) return
+
+    setRuntimeOIHistoryMap((previous) => {
+      let changed = false
+      const next: OIHistoryMap = { ...previous }
+
+      for (const strike of displayStrikes) {
+        const pair = strikeMap[strike]
+        if (!pair) continue
+
+        const current = next[strike] ?? { CE: [], PE: [] }
+        const nextCE = appendOIHistoryEntry(current.CE, pair.CE?.OIChange)
+        const nextPE = appendOIHistoryEntry(current.PE, pair.PE?.OIChange)
+
+        if (nextCE !== current.CE || nextPE !== current.PE) {
+          next[strike] = { CE: nextCE, PE: nextPE }
+          changed = true
+        }
+      }
+
+      return changed ? next : previous
+    })
+  }, [displayStrikes.join(","), strikeMap])
 
   async function handleExit(position: Position) {
     try {
@@ -674,7 +739,7 @@ export default function OptionTable() {
                           strike={strike}
                           pair={strikeMap[strike]}
                           spot={spot}
-                          history={oiHistoryMap[strike]}
+                          history={mergedOIHistoryMap[strike]}
                           onFeedback={setTradeMessage}
                         />
                       ))}
@@ -688,7 +753,7 @@ export default function OptionTable() {
                           strike={strike}
                           pair={strikeMap[strike]}
                           spot={spot}
-                          history={oiHistoryMap[strike]}
+                          history={mergedOIHistoryMap[strike]}
                           onFeedback={setTradeMessage}
                         />
                       ))}
@@ -700,7 +765,7 @@ export default function OptionTable() {
                       strike={strike}
                       pair={strikeMap[strike]}
                       spot={spot}
-                      history={oiHistoryMap[strike]}
+                      history={mergedOIHistoryMap[strike]}
                       onFeedback={setTradeMessage}
                     />
                   ))
