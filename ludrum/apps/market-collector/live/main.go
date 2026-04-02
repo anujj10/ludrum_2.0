@@ -96,44 +96,49 @@ func main() {
 	poller := ltpSeries.NewLTPPoller(fetcher, ltpStore)
 
 	ltpEngine := ltpSeries.NewLTPEngine(atmTracker, selector, poller)
+	isMarketHours := isIndianMarketOpen(time.Now())
 
 	// start poller once
-	ltpEngine.Start(ctx)
+	if isMarketHours {
+		ltpEngine.Start(ctx)
+	}
 
 	// ==========================
 	// 🔥 LTP → ALPHA → REDIS LOOP
 	// ==========================
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
+	if isMarketHours {
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
+			for {
+				select {
+				case <-ctx.Done():
+					return
 
-			case <-ticker.C:
+				case <-ticker.C:
 
-				for symbol := range poller.GetTrackedSymbols() {
+					for symbol := range poller.GetTrackedSymbols() {
 
-					state := ltpStore.GetState(symbol)
-					if state == nil {
-						continue
+						state := ltpStore.GetState(symbol)
+						if state == nil {
+							continue
+						}
+
+						alpha := processor.ComputeAlphaFromLTP(state.History)
+
+						payload := map[string]interface{}{
+							"symbol": symbol,
+							"alpha":  alpha,
+						}
+						log.Println("LTP ALPHA:", symbol, alpha.Signal)
+
+						redisClient.PublishLTP(payload)
 					}
-
-					alpha := processor.ComputeAlphaFromLTP(state.History)
-
-					payload := map[string]interface{}{
-						"symbol": symbol,
-						"alpha":  alpha,
-					}
-					log.Println("LTP ALPHA:", symbol, alpha.Signal)
-
-					redisClient.PublishLTP(payload)
 				}
 			}
-		}
-	}()
+		}()
+	}
 
 	// ==========================
 	// EXISTING MARKET STORE
@@ -168,62 +173,62 @@ func main() {
 		ltpEngine.OnIndexTick(ltp)
 	})
 
-	go wsIngestor.Start(ctx, cfg.AppID, cfg.AccessToken, []string{"NSE:NIFTY50-INDEX"})
+	if isMarketHours {
+		go wsIngestor.Start(ctx, cfg.AppID, cfg.AccessToken, []string{"NSE:NIFTY50-INDEX"})
 
-	// ==========================
-	// REST FETCH + UI BROADCAST (1s)
-	// ==========================
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
+		// ==========================
+		// REST FETCH + UI BROADCAST (1s)
+		// ==========================
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				runLivePipeline(fyModel, pipeline, state, redisClient, dbWorker, sim, liveSnapshotCache)
-			}
-		}
-	}()
-
-	// ==========================
-	// MARKET SNAPSHOT PERSIST (1m)
-	// ==========================
-	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				snapshotRows, ok := liveSnapshotCache.Get()
-				if !ok {
-					continue
-				}
-				go postgres.SaveMinuteSnapshots(snapshotRows)
-				if len(snapshotRows) > 0 {
-					log.Printf("Persisted %d market snapshot rows @ %s", len(snapshotRows), snapshotRows[0].Time.Format("15:04:05"))
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					runLivePipeline(fyModel, pipeline, state, redisClient, dbWorker, sim, liveSnapshotCache)
 				}
 			}
-		}
-	}()
+		}()
+
+		// ==========================
+		// MARKET SNAPSHOT PERSIST (1m)
+		// ==========================
+		go func() {
+			ticker := time.NewTicker(1 * time.Minute)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					snapshotRows, ok := liveSnapshotCache.Get()
+					if !ok {
+						continue
+					}
+					go postgres.SaveMinuteSnapshots(snapshotRows)
+					if len(snapshotRows) > 0 {
+						log.Printf("Persisted %d market snapshot rows @ %s", len(snapshotRows), snapshotRows[0].Time.Format("15:04:05"))
+					}
+				}
+			}
+		}()
+	} else {
+		log.Println("Market closed: auth/API stays online, live collectors paused.")
+	}
 
 	// ==========================
 	// SHUTDOWN
 	// ==========================
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	shutdownReason := make(chan string, 1)
-	go scheduleDailyShutdown(ctx, shutdownReason)
 
 	select {
 	case sig := <-sigChan:
 		log.Printf("Received shutdown signal: %v", sig)
-	case reason := <-shutdownReason:
-		log.Println(reason)
 	}
 
 	log.Println("Shutting down system...")
@@ -339,30 +344,15 @@ func mustLoadLocation(name string) *time.Location {
 	return location
 }
 
-func scheduleDailyShutdown(ctx context.Context, shutdownReason chan<- string) {
-	for {
-		now := time.Now().In(indiaLocation)
-		cutoff := time.Date(now.Year(), now.Month(), now.Day(), 15, 30, 0, 0, indiaLocation)
-
-		if !now.Before(cutoff) {
-			select {
-			case shutdownReason <- "Auto shutdown: started or ran past 15:30 IST":
-			default:
-			}
-			return
-		}
-
-		timer := time.NewTimer(time.Until(cutoff))
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-			select {
-			case shutdownReason <- "Auto shutdown: reached 15:30 IST":
-			default:
-			}
-			return
-		}
+func isIndianMarketOpen(now time.Time) bool {
+	local := now.In(indiaLocation)
+	if local.Weekday() == time.Saturday || local.Weekday() == time.Sunday {
+		return false
 	}
+
+	minutes := local.Hour()*60 + local.Minute()
+	openMinutes := 9*60 + 15
+	closeMinutes := 15*60 + 30
+
+	return minutes >= openMinutes && minutes < closeMinutes
 }
