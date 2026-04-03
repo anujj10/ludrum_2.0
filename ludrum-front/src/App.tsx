@@ -33,6 +33,7 @@ function isIndianMarketOpen(now: Date) {
 
 export default function App() {
   const [isMarketOpen, setIsMarketOpen] = useState(() => isIndianMarketOpen(new Date()))
+  const [marketOverrideReason, setMarketOverrideReason] = useState("")
   const [adminAuthState, setAdminAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
   const [adminClientId, setAdminClientId] = useState("")
   const hostname = window.location.hostname.toLowerCase()
@@ -45,6 +46,39 @@ export default function App() {
 
     return () => window.clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    if (isAdminHost) {
+      return
+    }
+
+    let active = true
+
+    const refreshStatus = () => {
+      fetch(`${API_BASE_URL}/market-status`)
+        .then(async (response) => {
+          const payload = (await response.json().catch(() => ({}))) as {
+            forced_closed?: boolean
+            reason?: string
+          }
+          if (!active || !response.ok) return
+          setMarketOverrideReason(payload.forced_closed ? payload.reason || "Markets are down right now. Please check back shortly." : "")
+        })
+        .catch(() => {
+          if (active) {
+            setMarketOverrideReason("")
+          }
+        })
+    }
+
+    refreshStatus()
+    const interval = window.setInterval(refreshStatus, 30000)
+
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [isAdminHost])
 
   useEffect(() => {
     if (!isAdminHost) {
@@ -94,7 +128,7 @@ export default function App() {
   }, [isAdminHost])
 
   useEffect(() => {
-    if (isAdminHost || !isMarketOpen) {
+    if (isAdminHost || !isMarketOpen || marketOverrideReason) {
       return
     }
 
@@ -105,7 +139,7 @@ export default function App() {
         ws.close()
       }
     }
-  }, [isAdminHost, isMarketOpen])
+  }, [isAdminHost, isMarketOpen, marketOverrideReason])
 
   async function handleAdminLogin(clientId: string, password: string) {
     try {
@@ -175,11 +209,11 @@ export default function App() {
     }
 
     return adminAuthState === "ready" ? (
-      <AdminDashboard clientId={adminClientId} onLogout={handleAdminLogout} />
+      <AdminDashboard adminToken={window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY) || ""} clientId={adminClientId} onLogout={handleAdminLogout} />
     ) : (
       <AdminLoginPage onLogin={handleAdminLogin} />
     )
   }
 
-  return isMarketOpen ? <OptionTable /> : <MarketClosedScreen />
+  return isMarketOpen && !marketOverrideReason ? <OptionTable /> : <MarketClosedScreen overrideReason={marketOverrideReason} />
 }

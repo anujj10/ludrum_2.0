@@ -1,6 +1,11 @@
+import { useEffect, useState } from "react"
+
+import { API_BASE_URL } from "../config"
+
 type AdminDashboardProps = {
   onLogout: () => void
   clientId: string
+  adminToken: string
 }
 
 const intakeQueue = [
@@ -34,12 +39,83 @@ const auditFeed = [
   "Admin subdomain verified and SSL active.",
 ] as const
 
-export default function AdminDashboard({ onLogout, clientId }: AdminDashboardProps) {
+export default function AdminDashboard({ onLogout, clientId, adminToken }: AdminDashboardProps) {
   const updatedAt = new Intl.DateTimeFormat("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: "Asia/Kolkata",
   }).format(new Date())
+  const [overrideEnabled, setOverrideEnabled] = useState(false)
+  const [overrideReason, setOverrideReason] = useState("Markets are down right now. Please check back shortly.")
+  const [overrideMessage, setOverrideMessage] = useState("")
+  const [overrideSaving, setOverrideSaving] = useState(false)
+
+  useEffect(() => {
+    let active = true
+
+    fetch(`${API_BASE_URL}/auth/admin/market-override`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    })
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => ({}))) as {
+          enabled?: boolean
+          reason?: string
+        }
+        if (!active || !response.ok) return
+        setOverrideEnabled(Boolean(payload.enabled))
+        if (payload.reason) {
+          setOverrideReason(payload.reason)
+        }
+      })
+      .catch(() => undefined)
+
+    return () => {
+      active = false
+    }
+  }, [adminToken])
+
+  async function handleOverrideSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setOverrideSaving(true)
+    setOverrideMessage("")
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/admin/market-override`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({
+          enabled: !overrideEnabled,
+          reason: overrideReason,
+        }),
+      })
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        enabled?: boolean
+        reason?: string
+        error?: string
+      }
+
+      if (!response.ok) {
+        setOverrideMessage(payload.error || "Unable to update market override right now.")
+        return
+      }
+
+      setOverrideEnabled(Boolean(payload.enabled))
+      if (typeof payload.reason === "string") {
+        setOverrideReason(payload.reason || "Markets are down right now. Please check back shortly.")
+      }
+      setOverrideMessage(payload.enabled ? "Manual market-down page is now active." : "Manual market-down page has been cleared.")
+    } catch {
+      setOverrideMessage("Unable to update market override right now.")
+    } finally {
+      setOverrideSaving(false)
+    }
+  }
 
   return (
     <main className="admin-shell">
@@ -139,12 +215,27 @@ export default function AdminDashboard({ onLogout, clientId }: AdminDashboardPro
             </div>
 
             <div className="admin-actions-card">
-              <h3>Next steps</h3>
-              <ul>
-                <li>Wire this dashboard to live beta-user records.</li>
-                <li>Add approve / revoke controls for client IDs.</li>
-                <li>Move admin auth to the backend for real protection.</li>
-              </ul>
+              <h3>Manual market override</h3>
+              <form className="admin-override-form" onSubmit={handleOverrideSubmit}>
+                <label>
+                  <span>Closed-page message</span>
+                  <textarea
+                    value={overrideReason}
+                    onChange={(event) => setOverrideReason(event.target.value)}
+                    placeholder="Markets are down right now. Please check back shortly."
+                    rows={4}
+                  />
+                </label>
+                <div className="admin-override-actions">
+                  <span className={`admin-override-state ${overrideEnabled ? "enabled" : ""}`}>
+                    {overrideEnabled ? "Override active" : "Override inactive"}
+                  </span>
+                  <button type="submit" className="hero-btn primary" disabled={overrideSaving}>
+                    {overrideSaving ? "Saving..." : overrideEnabled ? "Disable Markets Down Page" : "Enable Markets Down Page"}
+                  </button>
+                </div>
+                {overrideMessage ? <div className="admin-override-message">{overrideMessage}</div> : null}
+              </form>
             </div>
           </article>
         </section>

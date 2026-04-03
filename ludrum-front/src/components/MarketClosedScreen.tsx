@@ -41,9 +41,14 @@ function getNextOpenLabel(now: Date) {
   return "Reopens tomorrow at 9:15 AM IST"
 }
 
-export default function MarketClosedScreen() {
+type MarketClosedScreenProps = {
+  overrideReason?: string
+}
+
+export default function MarketClosedScreen({ overrideReason }: MarketClosedScreenProps) {
   const now = new Date()
   const nextOpenLabel = getNextOpenLabel(now)
+  const isOverride = Boolean(overrideReason)
 
   return (
     <main className="market-closed-shell">
@@ -55,10 +60,12 @@ export default function MarketClosedScreen() {
 
       <section className="market-closed-card">
         <p className="market-closed-kicker">Ludrum Terminal</p>
-        <h1>Indian market is closed</h1>
-        <p className="market-closed-copy">Market hours are done. Live options flow will resume automatically in the next session.</p>
+        <h1>{isOverride ? "Markets are down" : "Indian market is closed"}</h1>
+        <p className="market-closed-copy">
+          {isOverride ? overrideReason : "Market hours are done. Live options flow will resume automatically in the next session."}
+        </p>
         <div className="market-closed-meta">
-          <span>{nextOpenLabel}</span>
+          <span>{isOverride ? "Manual admin override is active" : nextOpenLabel}</span>
         </div>
       </section>
     </main>

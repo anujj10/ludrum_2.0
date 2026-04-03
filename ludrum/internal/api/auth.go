@@ -38,6 +38,11 @@ type verifyOTPPayload struct {
 	OTP      string `json:"otp"`
 }
 
+type marketOverridePayload struct {
+	Enabled bool   `json:"enabled"`
+	Reason  string `json:"reason"`
+}
+
 type adminTokenClaims struct {
 	ClientID  string `json:"client_id"`
 	ExpiresAt int64  `json:"exp"`
@@ -53,6 +58,7 @@ func RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/admin/login", api.handleAdminLogin)
 	mux.HandleFunc("/auth/admin/me", api.handleAdminMe)
 	mux.HandleFunc("/auth/admin/logout", api.handleAdminLogout)
+	mux.HandleFunc("/auth/admin/market-override", api.handleAdminMarketOverride)
 }
 
 func (a *AuthAPI) handleBetaRequest(w http.ResponseWriter, r *http.Request) {
@@ -323,6 +329,73 @@ func (a *AuthAPI) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 }
 
+func (a *AuthAPI) handleAdminMarketOverride(w http.ResponseWriter, r *http.Request) {
+	allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	adminClientID := strings.TrimSpace(os.Getenv("ADMIN_CLIENT_ID"))
+	adminSecret := strings.TrimSpace(os.Getenv("ADMIN_SESSION_SECRET"))
+	if adminClientID == "" || adminSecret == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "admin auth is not configured"})
+		return
+	}
+
+	claims, err := authorizeAdminRequest(r, adminSecret)
+	if err != nil || claims.ClientID != adminClientID {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		reason, err := postgres.GetMarketOverride(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to fetch market override"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled": reason != "",
+			"reason":  reason,
+		})
+	case http.MethodPost:
+		var payload marketOverridePayload
+		if err := decodeJSON(r, &payload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+
+		if payload.Enabled {
+			reason := strings.TrimSpace(payload.Reason)
+			if reason == "" {
+				reason = "Markets are down right now. Please check back shortly."
+			}
+			if err := postgres.SetMarketOverride(r.Context(), reason); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store market override"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"enabled": true,
+				"reason":  reason,
+			})
+			return
+		}
+
+		if err := postgres.ClearMarketOverride(r.Context()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to clear market override"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled": false,
+			"reason":  "",
+		})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
 func issueAdminToken(clientID, secret string, ttl time.Duration) (string, error) {
 	claims := adminTokenClaims{
 		ClientID:  clientID,
@@ -366,6 +439,14 @@ func verifyAdminToken(token, secret string) (*adminTokenClaims, error) {
 	}
 
 	return &claims, nil
+}
+
+func authorizeAdminRequest(r *http.Request, secret string) (*adminTokenClaims, error) {
+	token := extractBearerToken(r)
+	if token == "" {
+		return nil, fmt.Errorf("missing token")
+	}
+	return verifyAdminToken(token, secret)
 }
 
 func signAdminPayload(payload, secret string) string {

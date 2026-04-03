@@ -320,6 +320,70 @@
   padding-left: 18px;
 }
 
+.admin-override-form {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-override-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-override-form label span {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.admin-override-form textarea {
+  min-height: 110px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border-soft);
+  background: rgba(22, 20, 18, 0.92);
+  color: var(--text-primary);
+  resize: vertical;
+  font: inherit;
+}
+
+.admin-override-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-override-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: rgba(24, 22, 19, 0.88);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-override-state.enabled {
+  color: var(--accent-down);
+  border-color: rgba(240, 138, 122, 0.24);
+  background: rgba(56, 27, 24, 0.55);
+}
+
+.admin-override-message {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border-soft);
+  background: rgba(24, 22, 19, 0.88);
+  color: var(--text-secondary);
+}
+
 .market-closed-shell {
   position: relative;
   min-height: 100vh;
