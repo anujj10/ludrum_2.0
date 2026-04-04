@@ -32,6 +32,28 @@ var (
 	ErrSessionNotFound    = errors.New("session not found")
 )
 
+type AuthOverviewUser struct {
+	UserID                 int64      `json:"user_id"`
+	FullName               string     `json:"full_name"`
+	Email                  string     `json:"email"`
+	ClientID               string     `json:"client_id"`
+	Status                 string     `json:"status"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	LastCredentialSentAt   *time.Time `json:"last_credential_sent_at,omitempty"`
+	ActiveSessionCount     int64      `json:"active_session_count"`
+	PendingOTPCount        int64      `json:"pending_otp_count"`
+	LastSessionSeenAt      *time.Time `json:"last_session_seen_at,omitempty"`
+}
+
+type AuthOverview struct {
+	TotalUsers             int64              `json:"total_users"`
+	ActiveSessions         int64              `json:"active_sessions"`
+	PendingOTPs            int64              `json:"pending_otps"`
+	CredentialsIssuedToday int64              `json:"credentials_issued_today"`
+	Users                  []AuthOverviewUser `json:"users"`
+}
+
 func hashString(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
@@ -328,4 +350,93 @@ func GetUserBySessionToken(ctx context.Context, token string) (*BetaUser, error)
 func DeleteSession(ctx context.Context, token string) error {
 	_, err := DB.Exec(ctx, `DELETE FROM auth_sessions WHERE token_hash = $1`, hashString(strings.TrimSpace(token)))
 	return err
+}
+
+func GetAuthOverview(ctx context.Context, limit int) (*AuthOverview, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	overview := &AuthOverview{}
+
+	if err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM beta_users`).Scan(&overview.TotalUsers); err != nil {
+		return nil, err
+	}
+	if err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM auth_sessions WHERE expires_at > NOW()`).Scan(&overview.ActiveSessions); err != nil {
+		return nil, err
+	}
+	if err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM email_otp_codes WHERE consumed_at IS NULL AND expires_at > NOW()`).Scan(&overview.PendingOTPs); err != nil {
+		return nil, err
+	}
+	if err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM beta_users WHERE last_credential_sent_at >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata'`).Scan(&overview.CredentialsIssuedToday); err != nil {
+		return nil, err
+	}
+
+	rows, err := DB.Query(
+		ctx,
+		`
+		SELECT
+			u.id,
+			u.full_name,
+			u.email,
+			u.client_id,
+			u.status,
+			u.created_at,
+			u.updated_at,
+			u.last_credential_sent_at,
+			COALESCE(session_counts.active_session_count, 0),
+			COALESCE(otp_counts.pending_otp_count, 0),
+			session_counts.last_session_seen_at
+		FROM beta_users u
+		LEFT JOIN (
+			SELECT
+				user_id,
+				COUNT(*) FILTER (WHERE expires_at > NOW()) AS active_session_count,
+				MAX(last_seen_at) FILTER (WHERE expires_at > NOW()) AS last_session_seen_at
+			FROM auth_sessions
+			GROUP BY user_id
+		) session_counts ON session_counts.user_id = u.id
+		LEFT JOIN (
+			SELECT
+				user_id,
+				COUNT(*) FILTER (WHERE consumed_at IS NULL AND expires_at > NOW()) AS pending_otp_count
+			FROM email_otp_codes
+			GROUP BY user_id
+		) otp_counts ON otp_counts.user_id = u.id
+		ORDER BY u.updated_at DESC
+		LIMIT $1
+		`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	overview.Users = make([]AuthOverviewUser, 0, limit)
+	for rows.Next() {
+		var entry AuthOverviewUser
+		if err := rows.Scan(
+			&entry.UserID,
+			&entry.FullName,
+			&entry.Email,
+			&entry.ClientID,
+			&entry.Status,
+			&entry.CreatedAt,
+			&entry.UpdatedAt,
+			&entry.LastCredentialSentAt,
+			&entry.ActiveSessionCount,
+			&entry.PendingOTPCount,
+			&entry.LastSessionSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		overview.Users = append(overview.Users, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return overview, nil
 }

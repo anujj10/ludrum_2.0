@@ -60,6 +60,7 @@ func RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/admin/logout", api.handleAdminLogout)
 	mux.HandleFunc("/auth/admin/market-override", api.handleAdminMarketOverride)
 	mux.HandleFunc("/auth/admin/fyers/overview", api.handleAdminFyersOverview)
+	mux.HandleFunc("/auth/admin/system-overview", api.handleAdminSystemOverview)
 }
 
 func (a *AuthAPI) handleBetaRequest(w http.ResponseWriter, r *http.Request) {
@@ -424,6 +425,39 @@ func (a *AuthAPI) handleAdminFyersOverview(w http.ResponseWriter, r *http.Reques
 	overview, err := postgres.GetFyersOverview(r.Context(), 12)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load fyers overview"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, overview)
+}
+
+func (a *AuthAPI) handleAdminSystemOverview(w http.ResponseWriter, r *http.Request) {
+	allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	adminClientID := strings.TrimSpace(os.Getenv("ADMIN_CLIENT_ID"))
+	adminSecret := strings.TrimSpace(os.Getenv("ADMIN_SESSION_SECRET"))
+	if adminClientID == "" || adminSecret == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "admin auth is not configured"})
+		return
+	}
+
+	claims, err := authorizeAdminRequest(r, adminSecret)
+	if err != nil || claims.ClientID != adminClientID {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	overview, err := postgres.GetAuthOverview(r.Context(), 12)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load auth overview"})
 		return
 	}
 

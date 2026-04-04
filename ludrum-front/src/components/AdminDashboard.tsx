@@ -31,6 +31,28 @@ type FyersOverview = {
   users: FyersOverviewUser[]
 }
 
+type AuthOverviewUser = {
+  user_id: number
+  full_name: string
+  email: string
+  client_id: string
+  status: string
+  created_at?: string
+  updated_at?: string
+  last_credential_sent_at?: string
+  active_session_count: number
+  pending_otp_count: number
+  last_session_seen_at?: string
+}
+
+type AuthOverview = {
+  total_users: number
+  active_sessions: number
+  pending_otps: number
+  credentials_issued_today: number
+  users: AuthOverviewUser[]
+}
+
 function formatAdminDate(value?: string) {
   if (!value) return "-"
   const date = new Date(value)
@@ -67,6 +89,7 @@ export default function AdminDashboard({ onLogout, clientId, adminToken }: Admin
   const [overrideMessage, setOverrideMessage] = useState("")
   const [overrideSaving, setOverrideSaving] = useState(false)
   const [fyersOverview, setFyersOverview] = useState<FyersOverview | null>(null)
+  const [authOverview, setAuthOverview] = useState<AuthOverview | null>(null)
 
   async function loadFyersOverview() {
     const response = await fetch(`${API_BASE_URL}/auth/admin/fyers/overview`, {
@@ -79,6 +102,19 @@ export default function AdminDashboard({ onLogout, clientId, adminToken }: Admin
       throw new Error("Unable to load FYERS overview")
     }
     setFyersOverview(payload)
+  }
+
+  async function loadAuthOverview() {
+    const response = await fetch(`${API_BASE_URL}/auth/admin/system-overview`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    })
+    const payload = (await response.json().catch(() => null)) as AuthOverview | null
+    if (!response.ok || !payload) {
+      throw new Error("Unable to load auth overview")
+    }
+    setAuthOverview(payload)
   }
 
   useEffect(() => {
@@ -113,6 +149,12 @@ export default function AdminDashboard({ onLogout, clientId, adminToken }: Admin
     loadFyersOverview().catch(() => {
       if (active) {
         setFyersOverview(null)
+      }
+    })
+
+    loadAuthOverview().catch(() => {
+      if (active) {
+        setAuthOverview(null)
       }
     })
 
@@ -189,24 +231,92 @@ export default function AdminDashboard({ onLogout, clientId, adminToken }: Admin
         <section className="admin-metrics">
           <article>
             <span>Platform users</span>
-            <strong>{fyersOverview?.total_users ?? "-"}</strong>
+            <strong>{authOverview?.total_users ?? fyersOverview?.total_users ?? "-"}</strong>
             <small>Real registered accounts</small>
           </article>
           <article>
-            <span>Linked FYERS accounts</span>
-            <strong>{fyersOverview?.linked_accounts ?? "-"}</strong>
-            <small>Broker connections stored</small>
+            <span>Active sessions</span>
+            <strong>{authOverview?.active_sessions ?? "-"}</strong>
+            <small>Authenticated users right now</small>
           </article>
           <article>
-            <span>Stored token sets</span>
-            <strong>{fyersOverview?.stored_tokens ?? "-"}</strong>
-            <small>Encrypted tokens on platform</small>
+            <span>Pending OTPs</span>
+            <strong>{authOverview?.pending_otps ?? "-"}</strong>
+            <small>Login challenges awaiting verify</small>
           </article>
           <article>
-            <span>Active runtimes</span>
-            <strong>{fyersOverview?.active_runtimes ?? "-"}</strong>
-            <small>Live FYERS sessions running</small>
+            <span>Creds issued today</span>
+            <strong>{authOverview?.credentials_issued_today ?? "-"}</strong>
+            <small>Fresh client credentials created</small>
           </article>
+        </section>
+
+        <section className="admin-panel">
+          <div className="panel-head">
+            <h2>Auth system overview</h2>
+            <span>{authOverview ? `${authOverview.users.length} recent users` : "Loading..."}</span>
+          </div>
+
+          <div className="fyers-overview-cards">
+            <article>
+              <span>Total users</span>
+              <strong>{authOverview?.total_users ?? "-"}</strong>
+            </article>
+            <article>
+              <span>Active sessions</span>
+              <strong>{authOverview?.active_sessions ?? "-"}</strong>
+            </article>
+            <article>
+              <span>Pending OTPs</span>
+              <strong>{authOverview?.pending_otps ?? "-"}</strong>
+            </article>
+            <article>
+              <span>Issued today</span>
+              <strong>{authOverview?.credentials_issued_today ?? "-"}</strong>
+            </article>
+          </div>
+
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Client ID</th>
+                  <th>Status</th>
+                  <th>Sessions</th>
+                  <th>Pending OTPs</th>
+                  <th>Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {authOverview?.users?.length ? (
+                  authOverview.users.map((user) => (
+                    <tr key={`auth-${user.user_id}-${user.client_id}`}>
+                      <td>
+                        <div className="admin-user-cell">
+                          <strong>{user.full_name}</strong>
+                          <span>{user.email}</span>
+                        </div>
+                      </td>
+                      <td>{user.client_id}</td>
+                      <td>
+                        <span className={`admin-status-pill ${runtimeTone(user.status)}`}>{user.status}</span>
+                      </td>
+                      <td>{user.active_session_count}</td>
+                      <td>{user.pending_otp_count}</td>
+                      <td>{formatAdminDate(user.last_session_seen_at || user.last_credential_sent_at || user.updated_at)}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="empty-cell">
+                      No auth activity recorded yet. As beta users sign in and verify OTPs, this panel will populate automatically.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section className="admin-panel fyers-overview-panel">
