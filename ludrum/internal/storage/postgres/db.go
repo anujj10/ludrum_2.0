@@ -150,6 +150,43 @@ func ensureTimescaleTables() {
 			last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS fyers_accounts (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT NOT NULL REFERENCES beta_users(id) ON DELETE CASCADE,
+			broker_user_id TEXT,
+			app_id TEXT NOT NULL,
+			redirect_uri TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_connected_at TIMESTAMPTZ,
+			UNIQUE (user_id, app_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_fyers_accounts_user_id ON fyers_accounts(user_id)`,
+		`CREATE TABLE IF NOT EXISTS fyers_tokens (
+			id BIGSERIAL PRIMARY KEY,
+			account_id BIGINT NOT NULL UNIQUE REFERENCES fyers_accounts(id) ON DELETE CASCADE,
+			access_token_encrypted TEXT NOT NULL,
+			refresh_token_encrypted TEXT,
+			token_type TEXT NOT NULL DEFAULT 'Bearer',
+			expires_at TIMESTAMPTZ,
+			refreshed_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_fyers_tokens_expires_at ON fyers_tokens(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS user_runtime_status (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT NOT NULL REFERENCES beta_users(id) ON DELETE CASCADE,
+			account_id BIGINT NOT NULL REFERENCES fyers_accounts(id) ON DELETE CASCADE,
+			runtime_state TEXT NOT NULL DEFAULT 'pending',
+			last_ws_connect_at TIMESTAMPTZ,
+			last_tick_at TIMESTAMPTZ,
+			last_error TEXT,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (user_id, account_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_runtime_status_account_id ON user_runtime_status(account_id)`,
 		`CREATE TABLE IF NOT EXISTS app_settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL,
