@@ -44,6 +44,29 @@ type UserRuntimeStatus struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
+type UserFyersLink struct {
+	UserID             int64      `json:"user_id"`
+	FullName           string     `json:"full_name"`
+	Email              string     `json:"email"`
+	ClientID           string     `json:"client_id"`
+	FyersAccountID     *int64     `json:"fyers_account_id,omitempty"`
+	FyersStatus        string     `json:"fyers_status"`
+	BrokerUserID       string     `json:"broker_user_id,omitempty"`
+	RuntimeState       string     `json:"runtime_state"`
+	TokenExpiresAt     *time.Time `json:"token_expires_at,omitempty"`
+	LastConnectedAt    *time.Time `json:"last_connected_at,omitempty"`
+	RuntimeLastTickAt  *time.Time `json:"runtime_last_tick_at,omitempty"`
+	RuntimeLastError   string     `json:"runtime_last_error,omitempty"`
+}
+
+type FyersOverview struct {
+	TotalUsers           int64           `json:"total_users"`
+	LinkedAccounts       int64           `json:"linked_accounts"`
+	StoredTokens         int64           `json:"stored_tokens"`
+	ActiveRuntimes       int64           `json:"active_runtimes"`
+	Users                []UserFyersLink `json:"users"`
+}
+
 var ErrFyersAccountNotFound = errors.New("fyers account not found")
 
 func UpsertFyersAccount(ctx context.Context, userID int64, appID, redirectURI, brokerUserID, status string) (*FyersAccount, error) {
@@ -255,4 +278,87 @@ func scanUserRuntimeStatus(row rowScanner) (*UserRuntimeStatus, error) {
 		return nil, err
 	}
 	return status, nil
+}
+
+func GetFyersOverview(ctx context.Context, limit int) (*FyersOverview, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	overview := &FyersOverview{}
+
+	if err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM beta_users`).Scan(&overview.TotalUsers); err != nil {
+		return nil, err
+	}
+	if err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM fyers_accounts`).Scan(&overview.LinkedAccounts); err != nil {
+		return nil, err
+	}
+	if err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM fyers_tokens`).Scan(&overview.StoredTokens); err != nil {
+		return nil, err
+	}
+	if err := DB.QueryRow(ctx, `SELECT COUNT(*) FROM user_runtime_status WHERE runtime_state = 'running'`).Scan(&overview.ActiveRuntimes); err != nil {
+		return nil, err
+	}
+
+	rows, err := DB.Query(
+		ctx,
+		`
+		SELECT
+			u.id,
+			u.full_name,
+			u.email,
+			u.client_id,
+			a.id,
+			COALESCE(a.status, 'unlinked'),
+			COALESCE(a.broker_user_id, ''),
+			COALESCE(r.runtime_state, 'not-started'),
+			t.expires_at,
+			a.last_connected_at,
+			r.last_tick_at,
+			COALESCE(r.last_error, '')
+		FROM beta_users u
+		LEFT JOIN fyers_accounts a ON a.user_id = u.id
+		LEFT JOIN fyers_tokens t ON t.account_id = a.id
+		LEFT JOIN user_runtime_status r ON r.user_id = u.id AND (a.id IS NOT NULL AND r.account_id = a.id)
+		ORDER BY u.updated_at DESC
+		LIMIT $1
+		`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	overview.Users = make([]UserFyersLink, 0, limit)
+	for rows.Next() {
+		var (
+			entry     UserFyersLink
+			accountID *int64
+		)
+		if err := rows.Scan(
+			&entry.UserID,
+			&entry.FullName,
+			&entry.Email,
+			&entry.ClientID,
+			&accountID,
+			&entry.FyersStatus,
+			&entry.BrokerUserID,
+			&entry.RuntimeState,
+			&entry.TokenExpiresAt,
+			&entry.LastConnectedAt,
+			&entry.RuntimeLastTickAt,
+			&entry.RuntimeLastError,
+		); err != nil {
+			return nil, err
+		}
+		entry.FyersAccountID = accountID
+		overview.Users = append(overview.Users, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return overview, nil
 }

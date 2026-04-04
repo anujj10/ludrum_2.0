@@ -240,6 +240,61 @@
   margin-top: 18px;
 }
 
+.fyers-overview-panel {
+  margin-top: 18px;
+}
+
+.fyers-overview-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.fyers-overview-cards article {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--border-soft);
+  background: rgba(24, 22, 19, 0.88);
+}
+
+.fyers-overview-cards span,
+.admin-user-cell span,
+.admin-user-cell small {
+  color: var(--text-secondary);
+}
+
+.fyers-overview-cards strong,
+.admin-user-cell strong {
+  display: block;
+  margin-top: 10px;
+  color: var(--text-primary);
+  font-size: 1.35rem;
+}
+
+.admin-user-cell {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-status-pill.up {
+  color: var(--accent-up);
+  border-color: rgba(104, 211, 154, 0.18);
+  background: rgba(52, 90, 63, 0.28);
+}
+
+.admin-status-pill.down {
+  color: var(--accent-down);
+  border-color: rgba(240, 138, 122, 0.18);
+  background: rgba(96, 48, 41, 0.26);
+}
+
+.admin-status-pill.flat {
+  color: var(--accent-flat);
+  border-color: rgba(180, 167, 146, 0.16);
+  background: rgba(58, 52, 46, 0.38);
+}
+
 .admin-panel {
   padding: 18px;
 }
@@ -1417,6 +1472,10 @@ a {
   }
 
   .admin-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .fyers-overview-cards {
     grid-template-columns: 1fr;
   }
 
