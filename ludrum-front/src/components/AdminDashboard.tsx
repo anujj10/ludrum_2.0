@@ -8,37 +8,6 @@ type AdminDashboardProps = {
   adminToken: string
 }
 
-const intakeQueue = [
-  {
-    name: "Rohit Sharma",
-    email: "rohit.trades@gmail.com",
-    phone: "+91 98xxxx1304",
-    style: "Intraday index options",
-    status: "Review",
-  },
-  {
-    name: "Manya Jain",
-    email: "manya.market@outlook.com",
-    phone: "+91 88xxxx4290",
-    style: "Analysis only",
-    status: "Approved",
-  },
-  {
-    name: "Arjun Mehta",
-    email: "arjun.delta@yahoo.com",
-    phone: "+91 97xxxx7712",
-    style: "Short swing options",
-    status: "Pending",
-  },
-] as const
-
-const auditFeed = [
-  "New beta request received from Manya Jain.",
-  "API domain healthy and serving HTTPS.",
-  "Market collector in after-hours standby mode.",
-  "Admin subdomain verified and SSL active.",
-] as const
-
 type FyersOverviewUser = {
   user_id: number
   full_name: string
@@ -200,7 +169,7 @@ export default function AdminDashboard({ onLogout, clientId, adminToken }: Admin
           <div>
             <p className="eyebrow">Ludrum Admin</p>
             <h1>Operations dashboard</h1>
-            <p className="admin-subcopy">Review beta onboarding, keep an eye on system state, and manage the private rollout from one place.</p>
+            <p className="admin-subcopy">Live admin surface backed by real platform data only. No placeholders, no seeded demo rows.</p>
           </div>
           <div className="admin-topbar-actions">
             <div className="admin-updated-at">
@@ -219,24 +188,24 @@ export default function AdminDashboard({ onLogout, clientId, adminToken }: Admin
 
         <section className="admin-metrics">
           <article>
-            <span>Beta requests</span>
-            <strong>24</strong>
-            <small>7 awaiting review</small>
+            <span>Platform users</span>
+            <strong>{fyersOverview?.total_users ?? "-"}</strong>
+            <small>Real registered accounts</small>
           </article>
           <article>
-            <span>Active client IDs</span>
-            <strong>11</strong>
-            <small>3 issued today</small>
+            <span>Linked FYERS accounts</span>
+            <strong>{fyersOverview?.linked_accounts ?? "-"}</strong>
+            <small>Broker connections stored</small>
           </article>
           <article>
-            <span>API status</span>
-            <strong>Healthy</strong>
-            <small>After-hours standby</small>
+            <span>Stored token sets</span>
+            <strong>{fyersOverview?.stored_tokens ?? "-"}</strong>
+            <small>Encrypted tokens on platform</small>
           </article>
           <article>
-            <span>Market state</span>
-            <strong>Closed</strong>
-            <small>Live collectors paused</small>
+            <span>Active runtimes</span>
+            <strong>{fyersOverview?.active_runtimes ?? "-"}</strong>
+            <small>Live FYERS sessions running</small>
           </article>
         </section>
 
@@ -317,57 +286,13 @@ export default function AdminDashboard({ onLogout, clientId, adminToken }: Admin
         </section>
 
         <section className="admin-grid">
-          <article className="admin-panel">
-            <div className="panel-head">
-              <h2>Beta intake queue</h2>
-              <span>Latest registrations</span>
-            </div>
-
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>Style</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {intakeQueue.map((user) => (
-                    <tr key={user.email}>
-                      <td>{user.name}</td>
-                      <td>{user.email}</td>
-                      <td>{user.phone}</td>
-                      <td>{user.style}</td>
-                      <td>
-                        <span className="admin-status-pill">{user.status}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
           <article className="admin-panel admin-panel-stack">
             <div className="panel-head">
-              <h2>Operations feed</h2>
-              <span>Latest notes</span>
-            </div>
-
-            <div className="admin-feed">
-              {auditFeed.map((item) => (
-                <div className="admin-feed-item" key={item}>
-                  <span className="admin-feed-dot" />
-                  <p>{item}</p>
-                </div>
-              ))}
+              <h2>Manual market override</h2>
+              <span>Public-site fail-safe</span>
             </div>
 
             <div className="admin-actions-card">
-              <h3>Manual market override</h3>
               <form className="admin-override-form" onSubmit={handleOverrideSubmit}>
                 <label>
                   <span>Closed-page message</span>
