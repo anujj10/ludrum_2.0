@@ -2,15 +2,34 @@ import { useEffect, useState } from "react"
 import "./App.css"
 import AdminDashboard from "./components/AdminDashboard"
 import AdminLoginPage from "./components/AdminLoginPage"
+import FyersConnectPage from "./components/FyersConnectPage"
+import LoginPage from "./components/LoginPage"
 import MarketClosedScreen from "./components/MarketClosedScreen"
 import OptionTable from "./components/OptionTable"
-import { ADMIN_SESSION_STORAGE_KEY, API_BASE_URL } from "./config"
+import { ADMIN_SESSION_STORAGE_KEY, API_BASE_URL, AUTH_TOKEN_STORAGE_KEY, authHeaders } from "./config"
 import { initWebSocket } from "./ws/socket"
+
+type AppUser = {
+  client_id?: string
+  email?: string
+  full_name?: string
+}
+
+type FyersStatus = {
+  connected: boolean
+  status: string
+  broker_user_id?: string
+  token_expires_at?: string
+  last_connected_at?: string
+}
 
 export default function App() {
   const [marketOverrideReason, setMarketOverrideReason] = useState("")
   const [adminAuthState, setAdminAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
   const [adminClientId, setAdminClientId] = useState("")
+  const [userAuthState, setUserAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
+  const [user, setUser] = useState<AppUser | null>(null)
+  const [fyersStatus, setFyersStatus] = useState<FyersStatus | null>(null)
   const hostname = window.location.hostname.toLowerCase()
   const isAdminHost = hostname === "admin.ludrum.online" || hostname.startsWith("admin.")
 
@@ -44,6 +63,62 @@ export default function App() {
     return () => {
       active = false
       window.clearInterval(interval)
+    }
+  }, [isAdminHost])
+
+  useEffect(() => {
+    if (isAdminHost) {
+      return
+    }
+
+    const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
+    if (!token) {
+      setUserAuthState("blocked")
+      setUser(null)
+      setFyersStatus(null)
+      return
+    }
+
+    let active = true
+    setUserAuthState("loading")
+
+    const loadUser = fetch(`${API_BASE_URL}/auth/me`, {
+      headers: authHeaders(),
+    }).then(async (response) => {
+      const payload = (await response.json().catch(() => ({}))) as { user?: AppUser }
+      if (!response.ok || !payload.user?.client_id) {
+        throw new Error("invalid session")
+      }
+      return payload.user
+    })
+
+    const loadFyersStatus = fetch(`${API_BASE_URL}/broker/fyers/status`, {
+      headers: authHeaders(),
+    }).then(async (response) => {
+      const payload = (await response.json().catch(() => ({}))) as FyersStatus
+      if (!response.ok) {
+        throw new Error("broker status unavailable")
+      }
+      return payload
+    })
+
+    Promise.all([loadUser, loadFyersStatus])
+      .then(([nextUser, nextStatus]) => {
+        if (!active) return
+        setUser(nextUser)
+        setFyersStatus(nextStatus)
+        setUserAuthState("ready")
+      })
+      .catch(() => {
+        if (!active) return
+        window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+        setUser(null)
+        setFyersStatus(null)
+        setUserAuthState("blocked")
+      })
+
+    return () => {
+      active = false
     }
   }, [isAdminHost])
 
@@ -95,7 +170,7 @@ export default function App() {
   }, [isAdminHost])
 
   useEffect(() => {
-    if (isAdminHost || marketOverrideReason) {
+    if (isAdminHost || marketOverrideReason || userAuthState !== "ready" || !fyersStatus?.connected) {
       return
     }
 
@@ -106,7 +181,7 @@ export default function App() {
         ws.close()
       }
     }
-  }, [isAdminHost, marketOverrideReason])
+  }, [isAdminHost, marketOverrideReason, userAuthState, fyersStatus?.connected])
 
   async function handleAdminLogin(clientId: string, password: string) {
     try {
@@ -160,6 +235,45 @@ export default function App() {
     setAdminAuthState("blocked")
   }
 
+  async function handleUserLogout() {
+    const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
+    if (token) {
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: "POST",
+        headers: authHeaders(),
+      }).catch(() => undefined)
+    }
+
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    setUser(null)
+    setFyersStatus(null)
+    setUserAuthState("blocked")
+  }
+
+  async function handleFyersConnectStart() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/broker/fyers/connect/start`, {
+        method: "POST",
+        headers: authHeaders(),
+      })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; login_url?: string }
+      if (!response.ok || !payload.login_url) {
+        return {
+          ok: false,
+          error: payload.error || "Unable to start FYERS auth right now.",
+        }
+      }
+
+      window.location.href = payload.login_url
+      return { ok: true }
+    } catch {
+      return {
+        ok: false,
+        error: "Unable to reach the broker auth service right now.",
+      }
+    }
+  }
+
   if (isAdminHost) {
     if (adminAuthState === "loading") {
       return (
@@ -179,6 +293,35 @@ export default function App() {
       <AdminDashboard adminToken={window.localStorage.getItem(ADMIN_SESSION_STORAGE_KEY) || ""} clientId={adminClientId} onLogout={handleAdminLogout} />
     ) : (
       <AdminLoginPage onLogin={handleAdminLogin} />
+    )
+  }
+
+  if (userAuthState === "loading") {
+    return (
+      <main className="login-shell">
+        <section className="login-panel auth-loading-panel">
+          <div className="login-brand">
+            <p className="eyebrow">Private Access</p>
+            <h1>Checking your session</h1>
+            <p>Verifying your platform login and broker-link status before opening the terminal.</p>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (userAuthState !== "ready" || !user?.client_id) {
+    return <LoginPage onAuthenticated={() => window.location.reload()} />
+  }
+
+  if (!fyersStatus?.connected) {
+    return (
+      <FyersConnectPage
+        clientId={user.client_id}
+        onLogout={handleUserLogout}
+        onStartConnect={handleFyersConnectStart}
+        status={fyersStatus}
+      />
     )
   }
 

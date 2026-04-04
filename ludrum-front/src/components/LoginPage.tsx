@@ -2,7 +2,11 @@ import { useState } from "react"
 
 import { API_BASE_URL, AUTH_TOKEN_STORAGE_KEY } from "../config"
 
-export default function LoginPage() {
+type LoginPageProps = {
+  onAuthenticated?: () => void
+}
+
+export default function LoginPage({ onAuthenticated }: LoginPageProps) {
   const [step, setStep] = useState<"credentials" | "otp">("credentials")
   const [clientId, setClientId] = useState("")
   const [password, setPassword] = useState("")
@@ -72,7 +76,11 @@ export default function LoginPage() {
       }
 
       window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, payload.token)
-      window.location.href = "/terminal"
+      if (onAuthenticated) {
+        onAuthenticated()
+      } else {
+        window.location.href = "/"
+      }
     } catch {
       setMessage("OTP verification failed")
     } finally {
@@ -84,9 +92,6 @@ export default function LoginPage() {
     <main className="login-shell">
       <section className="login-panel">
         <div className="login-brand">
-          <a className="back-link" href="/">
-            Back to home
-          </a>
           <p className="eyebrow">Private Access</p>
           <h1>Client login</h1>
           <p>

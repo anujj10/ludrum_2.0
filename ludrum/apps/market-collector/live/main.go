@@ -154,6 +154,7 @@ func main() {
 	tradeAPI.RegisterRoutes(http.DefaultServeMux)
 	api.RegisterOIEventRoutes(http.DefaultServeMux)
 	api.RegisterAuthRoutes(http.DefaultServeMux)
+	api.RegisterBrokerRoutes(http.DefaultServeMux)
 	api.StartWS(redisClient, "8081")
 
 	// ==========================
