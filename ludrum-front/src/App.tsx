@@ -7,45 +7,12 @@ import OptionTable from "./components/OptionTable"
 import { ADMIN_SESSION_STORAGE_KEY, API_BASE_URL } from "./config"
 import { initWebSocket } from "./ws/socket"
 
-const MARKET_TIMEZONE = "Asia/Kolkata"
-const MARKET_OPEN_MINUTES = 9 * 60 + 15
-const MARKET_CLOSE_MINUTES = 15 * 60 + 30
-
-function isIndianMarketOpen(now: Date) {
-  const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: MARKET_TIMEZONE,
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  })
-
-  const parts = formatter.formatToParts(now)
-  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  const weekday = map.weekday ?? ""
-  const hour = Number(map.hour ?? "0")
-  const minute = Number(map.minute ?? "0")
-  const minutes = hour * 60 + minute
-  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday)
-
-  return isWeekday && minutes >= MARKET_OPEN_MINUTES && minutes < MARKET_CLOSE_MINUTES
-}
-
 export default function App() {
-  const [isMarketOpen, setIsMarketOpen] = useState(() => isIndianMarketOpen(new Date()))
   const [marketOverrideReason, setMarketOverrideReason] = useState("")
   const [adminAuthState, setAdminAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
   const [adminClientId, setAdminClientId] = useState("")
   const hostname = window.location.hostname.toLowerCase()
   const isAdminHost = hostname === "admin.ludrum.online" || hostname.startsWith("admin.")
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setIsMarketOpen(isIndianMarketOpen(new Date()))
-    }, 60000)
-
-    return () => window.clearInterval(interval)
-  }, [])
 
   useEffect(() => {
     if (isAdminHost) {
@@ -128,7 +95,7 @@ export default function App() {
   }, [isAdminHost])
 
   useEffect(() => {
-    if (isAdminHost || !isMarketOpen || marketOverrideReason) {
+    if (isAdminHost || marketOverrideReason) {
       return
     }
 
@@ -139,7 +106,7 @@ export default function App() {
         ws.close()
       }
     }
-  }, [isAdminHost, isMarketOpen, marketOverrideReason])
+  }, [isAdminHost, marketOverrideReason])
 
   async function handleAdminLogin(clientId: string, password: string) {
     try {
@@ -215,5 +182,5 @@ export default function App() {
     )
   }
 
-  return isMarketOpen && !marketOverrideReason ? <OptionTable /> : <MarketClosedScreen overrideReason={marketOverrideReason} />
+  return marketOverrideReason ? <MarketClosedScreen overrideReason={marketOverrideReason} /> : <OptionTable />
 }
