@@ -308,16 +308,25 @@ function SpotRow({ spot }: { spot: number }) {
 }
 
 export default function OptionTable({
+  fullName,
+  email,
   clientId,
   fyersStatus,
   onLogout,
+  onReconnectBroker,
 }: {
+  fullName?: string
+  email?: string
   clientId: string
   fyersStatus: BrokerStatus
   onLogout: () => void
+  onReconnectBroker: () => Promise<{ ok: boolean; error?: string }>
 }) {
   const [oiHistoryMap, setOIHistoryMap] = useState<OIHistoryMap>({})
   const [runtimeOIHistoryMap, setRuntimeOIHistoryMap] = useState<OIHistoryMap>({})
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [reconnectingBroker, setReconnectingBroker] = useState(false)
+  const [profileMessage, setProfileMessage] = useState("")
   const hydrate = useOptionStore((state) => state.hydrate)
   const strikeMap = useOptionStore((state) => state.strikeMap)
   const spot = useOptionStore((state) => state.spot)
@@ -445,6 +454,16 @@ export default function OptionTable({
     })
   }, [displayStrikes.join(","), strikeMap])
 
+  async function handleReconnectBroker() {
+    setReconnectingBroker(true)
+    setProfileMessage("")
+    const result = await onReconnectBroker()
+    setReconnectingBroker(false)
+    if (!result.ok) {
+      setProfileMessage(result.error || "Unable to reconnect FYERS right now.")
+    }
+  }
+
   return (
     <div className="terminal-shell">
       <header className="topbar">
@@ -475,10 +494,58 @@ export default function OptionTable({
               <span className="session-meta">Broker user: {fyersStatus.broker_user_id || "-"}</span>
               <span className="session-meta">Last linked: {formatStatusDate(fyersStatus.last_connected_at)}</span>
             </div>
-            <button type="button" className="hero-btn secondary session-logout" onClick={onLogout}>
-              Log out
-            </button>
+            <div className="session-actions">
+              <button
+                type="button"
+                className="hero-btn secondary session-profile-toggle"
+                onClick={() => setProfileOpen((current) => !current)}
+              >
+                {profileOpen ? "Hide profile" : "Profile"}
+              </button>
+              <button type="button" className="hero-btn secondary session-logout" onClick={onLogout}>
+                Log out
+              </button>
+            </div>
           </div>
+          {profileOpen ? (
+            <div className="profile-panel">
+              <div className="profile-grid">
+                <article>
+                  <span>Name</span>
+                  <strong>{fullName || "-"}</strong>
+                </article>
+                <article>
+                  <span>Email</span>
+                  <strong>{email || "-"}</strong>
+                </article>
+                <article>
+                  <span>Client ID</span>
+                  <strong>{clientId}</strong>
+                </article>
+                <article>
+                  <span>Broker user</span>
+                  <strong>{fyersStatus.broker_user_id || "-"}</strong>
+                </article>
+                <article>
+                  <span>FYERS status</span>
+                  <strong>{fyersStatus.status || "unlinked"}</strong>
+                </article>
+                <article>
+                  <span>Token expiry</span>
+                  <strong>{formatStatusDate(fyersStatus.token_expires_at)}</strong>
+                </article>
+              </div>
+              <div className="profile-actions">
+                <button type="button" className="hero-btn secondary" onClick={handleReconnectBroker} disabled={reconnectingBroker}>
+                  {reconnectingBroker ? "Redirecting..." : "Reconnect FYERS"}
+                </button>
+                <button type="button" className="hero-btn secondary" onClick={onLogout}>
+                  Log out
+                </button>
+              </div>
+              {profileMessage ? <div className="login-message">{profileMessage}</div> : null}
+            </div>
+          ) : null}
         </div>
       </header>
 

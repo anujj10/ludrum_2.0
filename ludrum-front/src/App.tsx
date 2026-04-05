@@ -372,6 +372,13 @@ export default function App() {
   return marketOverrideReason ? (
     <MarketClosedScreen overrideReason={marketOverrideReason} />
   ) : (
-    <OptionTable clientId={user.client_id} fyersStatus={fyersStatus} onLogout={handleUserLogout} />
+    <OptionTable
+      fullName={user.full_name}
+      email={user.email}
+      clientId={user.client_id}
+      fyersStatus={fyersStatus}
+      onLogout={handleUserLogout}
+      onReconnectBroker={handleFyersConnectStart}
+    />
   )
 }
