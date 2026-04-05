@@ -626,6 +626,17 @@
   letter-spacing: -0.05em;
 }
 
+.topbar-brand,
+.topbar-side {
+  position: relative;
+  z-index: 1;
+}
+
+.topbar-side {
+  display: grid;
+  gap: 14px;
+}
+
 .status-grid,
 .ledger-grid {
   display: grid;
@@ -648,6 +659,46 @@
 .status-card {
   padding: 14px 16px;
   border-radius: 16px;
+}
+
+.session-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-card);
+}
+
+.session-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.session-kicker,
+.session-meta {
+  color: var(--text-secondary);
+}
+
+.session-kicker {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.session-copy strong {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.session-meta {
+  font-size: 0.86rem;
+}
+
+.session-logout {
+  min-width: 112px;
 }
 
 .status-card span,
@@ -1469,6 +1520,15 @@ a {
   .hero-actions,
   .otp-actions {
     flex-direction: column;
+  }
+
+  .session-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .session-logout {
+    width: 100%;
   }
 
   .admin-metrics {

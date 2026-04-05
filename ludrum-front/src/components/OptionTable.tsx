@@ -12,6 +12,14 @@ type OIChangeEntry = {
 
 type OIHistoryMap = Record<number, { CE: OIChangeEntry[]; PE: OIChangeEntry[] }>
 
+type BrokerStatus = {
+  connected: boolean
+  status: string
+  broker_user_id?: string
+  token_expires_at?: string
+  last_connected_at?: string
+}
+
 function appendOIHistoryEntry(entries: OIChangeEntry[] | undefined, value: number | undefined) {
   if (value === undefined || value === null || Number.isNaN(value) || value === 0) {
     return entries ?? []
@@ -64,6 +72,17 @@ function formatCompact(value: number | undefined) {
     notation: "compact",
     maximumFractionDigits: 2,
   }).format(value)
+}
+
+function formatStatusDate(value?: string) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Kolkata",
+  })
 }
 
 function formatTapeValue(value: number | undefined) {
@@ -288,7 +307,15 @@ function SpotRow({ spot }: { spot: number }) {
   )
 }
 
-export default function OptionTable() {
+export default function OptionTable({
+  clientId,
+  fyersStatus,
+  onLogout,
+}: {
+  clientId: string
+  fyersStatus: BrokerStatus
+  onLogout: () => void
+}) {
   const [oiHistoryMap, setOIHistoryMap] = useState<OIHistoryMap>({})
   const [runtimeOIHistoryMap, setRuntimeOIHistoryMap] = useState<OIHistoryMap>({})
   const hydrate = useOptionStore((state) => state.hydrate)
@@ -421,22 +448,36 @@ export default function OptionTable() {
   return (
     <div className="terminal-shell">
       <header className="topbar">
-        <div>
+        <div className="topbar-brand">
           <p className="eyebrow">Ludrum Terminal</p>
           <h1>Options Flow Deck</h1>
         </div>
-        <div className="status-grid">
-          <div className="status-card">
-            <span>Feed</span>
-            <strong>{lastType ? `LIVE ${lastType.toUpperCase()}` : "WAITING"}</strong>
+        <div className="topbar-side">
+          <div className="status-grid">
+            <div className="status-card">
+              <span>Feed</span>
+              <strong>{lastType ? `LIVE ${lastType.toUpperCase()}` : "WAITING"}</strong>
+            </div>
+            <div className="status-card">
+              <span>Spot</span>
+              <strong>{formatNumber(spot)}</strong>
+            </div>
+            <div className="status-card">
+              <span>ATM</span>
+              <strong>{atm ? formatNumber(atm.Strike, 0) : "-"}</strong>
+            </div>
           </div>
-          <div className="status-card">
-            <span>Spot</span>
-            <strong>{formatNumber(spot)}</strong>
-          </div>
-          <div className="status-card">
-            <span>ATM</span>
-            <strong>{atm ? formatNumber(atm.Strike, 0) : "-"}</strong>
+          <div className="session-card">
+            <div className="session-copy">
+              <span className="session-kicker">Signed in as</span>
+              <strong>{clientId}</strong>
+              <span className="session-meta">FYERS {fyersStatus.connected ? "linked" : fyersStatus.status || "unlinked"}</span>
+              <span className="session-meta">Broker user: {fyersStatus.broker_user_id || "-"}</span>
+              <span className="session-meta">Last linked: {formatStatusDate(fyersStatus.last_connected_at)}</span>
+            </div>
+            <button type="button" className="hero-btn secondary session-logout" onClick={onLogout}>
+              Log out
+            </button>
           </div>
         </div>
       </header>
