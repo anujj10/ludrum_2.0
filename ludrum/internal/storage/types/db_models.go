@@ -54,3 +54,9 @@ type DBOIChangeEvent struct {
 	OIChange   int64
 	LTPChange  float64
 }
+
+type UserScopedOIChangeEvent struct {
+	UserID    int64
+	AccountID int64
+	DBOIChangeEvent
+}

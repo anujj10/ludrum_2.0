@@ -82,6 +82,26 @@ func handleOIEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if user != nil {
+		if account, accountErr := postgres.GetFyersAccountByUserID(r.Context(), user.ID); accountErr == nil {
+			if events, loadErr := postgres.LoadUserRuntimeOIEvents(r.Context(), user.ID, account.ID, symbol, strikes, limit); loadErr == nil && len(events) > 0 {
+				result := make([]oiEventRow, 0, len(events))
+				for _, event := range events {
+					result = append(result, oiEventRow{
+						Time:       event.Time,
+						Symbol:     event.Symbol,
+						Strike:     event.Strike,
+						OptionType: event.OptionType,
+						OIChange:   event.OIChange,
+						LTPChange:  event.LTPChange,
+					})
+				}
+				writeJSON(w, http.StatusOK, result)
+				return
+			}
+		}
+	}
+
 	rows, err := postgres.DB.Query(
 		r.Context(),
 		`

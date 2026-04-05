@@ -187,6 +187,29 @@ func ensureTimescaleTables() {
 			UNIQUE (user_id, account_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_runtime_status_account_id ON user_runtime_status(account_id)`,
+		`CREATE TABLE IF NOT EXISTS user_runtime_snapshots (
+			time TIMESTAMPTZ NOT NULL,
+			user_id BIGINT NOT NULL REFERENCES beta_users(id) ON DELETE CASCADE,
+			account_id BIGINT NOT NULL REFERENCES fyers_accounts(id) ON DELETE CASCADE,
+			payload_type TEXT NOT NULL DEFAULT 'snapshot',
+			spot DOUBLE PRECISION,
+			pair_count INTEGER NOT NULL DEFAULT 0,
+			payload_json JSONB NOT NULL
+		)`,
+		`SELECT create_hypertable('user_runtime_snapshots', 'time', if_not_exists => TRUE)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_runtime_snapshots_user_account_time ON user_runtime_snapshots(user_id, account_id, time DESC)`,
+		`CREATE TABLE IF NOT EXISTS user_option_oi_change_events (
+			time TIMESTAMPTZ NOT NULL,
+			user_id BIGINT NOT NULL REFERENCES beta_users(id) ON DELETE CASCADE,
+			account_id BIGINT NOT NULL REFERENCES fyers_accounts(id) ON DELETE CASCADE,
+			symbol TEXT,
+			strike DOUBLE PRECISION,
+			option_type TEXT,
+			oi_change BIGINT,
+			ltp_change DOUBLE PRECISION
+		)`,
+		`SELECT create_hypertable('user_option_oi_change_events', 'time', if_not_exists => TRUE)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_option_oi_events_scope_time ON user_option_oi_change_events(user_id, account_id, symbol, strike, option_type, time DESC)`,
 		`CREATE TABLE IF NOT EXISTS app_settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL,

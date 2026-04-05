@@ -51,6 +51,19 @@ func (s *Server) handlePairs(w http.ResponseWriter, r *http.Request) {
 				json.NewEncoder(w).Encode(data)
 				return
 			}
+
+			snapshot := runtimeInstance.Snapshot()
+			if payload, ok, loadErr := postgres.LoadLatestUserRuntimeSnapshot(r.Context(), user.ID, snapshot.AccountID); loadErr == nil && ok && len(payload.Pairs) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(payload.Pairs)
+				return
+			}
+		} else if account, accountErr := postgres.GetFyersAccountByUserID(r.Context(), user.ID); accountErr == nil {
+			if payload, ok, loadErr := postgres.LoadLatestUserRuntimeSnapshot(r.Context(), user.ID, account.ID); loadErr == nil && ok && len(payload.Pairs) > 0 {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(payload.Pairs)
+				return
+			}
 		}
 	}
 

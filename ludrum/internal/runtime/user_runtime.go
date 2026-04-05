@@ -14,6 +14,7 @@ import (
 	"ludrum/internal/processor"
 	"ludrum/internal/simulator"
 	"ludrum/internal/storage/postgres"
+	"ludrum/internal/storage/types"
 )
 
 type UserRuntime struct {
@@ -216,15 +217,41 @@ func (r *UserRuntime) runCycle(ctx context.Context) error {
 	streamPayload := r.pipeline.Process(snap, r.sim)
 
 	now := time.Now().UTC()
+	newEvents := r.recordOIEvents(snap.Symbol, now, streamPayload.Pairs)
+
 	r.mu.Lock()
 	r.state = "running"
 	r.lastError = ""
 	r.lastTickAt = &now
 	r.latestPayload = streamPayload
 	r.hasPayload = true
-	r.recordOIEvents(snap.Symbol, now, streamPayload.Pairs)
 	r.revision++
 	r.mu.Unlock()
+
+	if err := postgres.SaveUserRuntimeSnapshot(ctx, r.config.UserID, r.config.AccountID, streamPayload); err != nil && ctx.Err() == nil {
+		log.Printf("failed to persist runtime snapshot for user %d: %v", r.config.UserID, err)
+	}
+
+	if len(newEvents) > 0 {
+		scopedEvents := make([]types.UserScopedOIChangeEvent, 0, len(newEvents))
+		for _, event := range newEvents {
+			scopedEvents = append(scopedEvents, types.UserScopedOIChangeEvent{
+				UserID:    r.config.UserID,
+				AccountID: r.config.AccountID,
+				DBOIChangeEvent: types.DBOIChangeEvent{
+					Time:       event.Time,
+					Symbol:     event.Symbol,
+					Strike:     event.Strike,
+					OptionType: event.OptionType,
+					OIChange:   event.OIChange,
+					LTPChange:  event.LTPChange,
+				},
+			})
+		}
+		if err := postgres.SaveUserRuntimeOIEvents(ctx, scopedEvents); err != nil && ctx.Err() == nil {
+			log.Printf("failed to persist runtime OI events for user %d: %v", r.config.UserID, err)
+		}
+	}
 
 	return r.writeRuntimeStatus(ctx, "running", "")
 }
@@ -272,38 +299,52 @@ func (r *UserRuntime) GetOIEvents(symbol string, strikes []float64, limit int) [
 	return result
 }
 
-func (r *UserRuntime) recordOIEvents(symbol string, ts time.Time, pairs []models.PairSignal) {
+func (r *UserRuntime) recordOIEvents(symbol string, ts time.Time, pairs []models.PairSignal) []OIEvent {
+	newEvents := make([]OIEvent, 0, len(pairs)*2)
+
 	for _, pair := range pairs {
 		if pair.CE.OIChange != 0 {
-			key := oiEventKey(symbol, pair.Strike, "CE")
-			r.oiEvents[key] = appendOIEvent(r.oiEvents[key], OIEvent{
+			event := OIEvent{
 				Time:       ts,
 				Symbol:     symbol,
 				Strike:     pair.Strike,
 				OptionType: "CE",
 				OIChange:   pair.CE.OIChange,
 				LTPChange:  pair.CE.LTPChange,
-			})
+			}
+			key := oiEventKey(symbol, pair.Strike, "CE")
+			updated, appended := appendOIEvent(r.oiEvents[key], event)
+			r.oiEvents[key] = updated
+			if appended {
+				newEvents = append(newEvents, event)
+			}
 		}
 		if pair.PE.OIChange != 0 {
-			key := oiEventKey(symbol, pair.Strike, "PE")
-			r.oiEvents[key] = appendOIEvent(r.oiEvents[key], OIEvent{
+			event := OIEvent{
 				Time:       ts,
 				Symbol:     symbol,
 				Strike:     pair.Strike,
 				OptionType: "PE",
 				OIChange:   pair.PE.OIChange,
 				LTPChange:  pair.PE.LTPChange,
-			})
+			}
+			key := oiEventKey(symbol, pair.Strike, "PE")
+			updated, appended := appendOIEvent(r.oiEvents[key], event)
+			r.oiEvents[key] = updated
+			if appended {
+				newEvents = append(newEvents, event)
+			}
 		}
 	}
+
+	return newEvents
 }
 
-func appendOIEvent(existing []OIEvent, next OIEvent) []OIEvent {
+func appendOIEvent(existing []OIEvent, next OIEvent) ([]OIEvent, bool) {
 	if len(existing) > 0 {
 		last := existing[len(existing)-1]
 		if last.OIChange == next.OIChange && last.LTPChange == next.LTPChange {
-			return existing
+			return existing, false
 		}
 	}
 
@@ -312,7 +353,7 @@ func appendOIEvent(existing []OIEvent, next OIEvent) []OIEvent {
 	if len(existing) > maxOIEvents {
 		existing = existing[len(existing)-maxOIEvents:]
 	}
-	return existing
+	return existing, true
 }
 
 func recentOIEvents(entries []OIEvent, limit int) []OIEvent {
