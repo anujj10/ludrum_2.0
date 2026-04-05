@@ -229,10 +229,11 @@ func normalizeFyersStatus(status string) string {
 
 func scanFyersAccount(row rowScanner) (*FyersAccount, error) {
 	account := &FyersAccount{}
+	var brokerUserID *string
 	if err := row.Scan(
 		&account.ID,
 		&account.UserID,
-		&account.BrokerUserID,
+		&brokerUserID,
 		&account.AppID,
 		&account.RedirectURI,
 		&account.Status,
@@ -241,6 +242,9 @@ func scanFyersAccount(row rowScanner) (*FyersAccount, error) {
 		&account.LastConnectedAt,
 	); err != nil {
 		return nil, err
+	}
+	if brokerUserID != nil {
+		account.BrokerUserID = *brokerUserID
 	}
 	return account, nil
 }
