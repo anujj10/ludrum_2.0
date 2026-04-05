@@ -9,12 +9,18 @@ import (
 )
 
 type Manager struct {
+	baseCtx  context.Context
 	mu       sync.RWMutex
 	runtimes map[string]*UserRuntime
 }
 
-func NewManager() *Manager {
+func NewManager(ctx context.Context) *Manager {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	return &Manager{
+		baseCtx:  ctx,
 		runtimes: make(map[string]*UserRuntime),
 	}
 }
@@ -35,7 +41,12 @@ func (m *Manager) EnsureUserRuntime(ctx context.Context, config fyers.RuntimeCon
 	}
 
 	runtime := NewUserRuntime(config)
-	if err := runtime.Start(ctx); err != nil {
+	runtimeCtx := m.baseCtx
+	if runtimeCtx == nil {
+		runtimeCtx = context.Background()
+	}
+
+	if err := runtime.Start(runtimeCtx); err != nil {
 		return nil, err
 	}
 	m.runtimes[key] = runtime

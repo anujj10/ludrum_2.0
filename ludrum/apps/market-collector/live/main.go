@@ -76,7 +76,7 @@ func main() {
 	redisClient := redis.NewRedisClient(redisAddr, mode)
 	dbWorker := postgres.NewDBWorker()
 	dbWorker.Start()
-	runtimeManager := runtime.NewManager()
+	runtimeManager := runtime.NewManager(ctx)
 
 	pipeline := processor.NewPipeline()
 	sim := simulator.NewSimulator()
