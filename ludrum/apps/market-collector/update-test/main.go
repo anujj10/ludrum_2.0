@@ -116,10 +116,10 @@ func main() {
 	// ==========================
 	// API + WS
 	// ==========================
-	apiServer := api.NewServer(state)
+	apiServer := api.NewServer(state, nil)
 	apiServer.Start()
 
-	api.StartWS(redisClient, "8082")
+	api.StartWS(redisClient, "8082", nil)
 
 	// ==========================
 	// WS INGESTOR

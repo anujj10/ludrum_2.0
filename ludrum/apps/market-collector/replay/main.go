@@ -62,9 +62,9 @@ func main() {
 	}()
 
 	// ================= API + WS =================
-	apiServer := api.NewServer(state)
+	apiServer := api.NewServer(state, nil)
 	apiServer.Start()
-	api.StartWS(redisClient, "8083")
+	api.StartWS(redisClient, "8083", nil)
 
 	// ================= REPLAY CONFIG =================
 	ctx := context.Background()

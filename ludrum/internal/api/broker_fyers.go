@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"ludrum/internal/broker/fyers"
+	"ludrum/internal/runtime"
 	"ludrum/internal/storage/postgres"
 )
 
@@ -33,7 +34,11 @@ type fyersStatusResponse struct {
 }
 
 func RegisterBrokerRoutes(mux *http.ServeMux) {
-	api := &AuthAPI{}
+	RegisterBrokerRoutesWithRuntime(mux, nil)
+}
+
+func RegisterBrokerRoutesWithRuntime(mux *http.ServeMux, runtimeManager *runtime.Manager) {
+	api := &AuthAPI{RuntimeManager: runtimeManager}
 	mux.HandleFunc("/broker/fyers/status", api.handleFyersStatus)
 	mux.HandleFunc("/broker/fyers/connect/start", api.handleFyersConnectStart)
 	mux.HandleFunc("/broker/fyers/callback", api.handleFyersCallback)
@@ -213,6 +218,12 @@ func (a *AuthAPI) handleFyersCallback(w http.ResponseWriter, r *http.Request) {
 	if _, err := postgres.UpsertUserRuntimeStatus(r.Context(), claims.UserID, account.ID, "linked", &now, nil, ""); err != nil {
 		http.Redirect(w, r, frontendFailureURL("runtime_status_failed"), http.StatusFound)
 		return
+	}
+
+	if a.RuntimeManager != nil {
+		if runtimeConfig, configErr := loadFyersRuntimeConfigForUser(r.Context(), claims.UserID); configErr == nil {
+			_, _ = a.RuntimeManager.EnsureUserRuntime(r.Context(), runtimeConfig)
+		}
 	}
 
 	http.Redirect(w, r, redirectURL, http.StatusFound)

@@ -19,6 +19,7 @@ import (
 	ltpSeries "ludrum/internal/ltp-series"
 	"ludrum/internal/parser"
 	"ludrum/internal/processor"
+	"ludrum/internal/runtime"
 	"ludrum/internal/simulator"
 	"ludrum/internal/storage/postgres"
 	"ludrum/internal/storage/redis"
@@ -75,6 +76,7 @@ func main() {
 	redisClient := redis.NewRedisClient(redisAddr, mode)
 	dbWorker := postgres.NewDBWorker()
 	dbWorker.Start()
+	runtimeManager := runtime.NewManager()
 
 	pipeline := processor.NewPipeline()
 	sim := simulator.NewSimulator()
@@ -148,14 +150,14 @@ func main() {
 	// ==========================
 	// API + WS
 	// ==========================
-	apiServer := api.NewServer(state)
+	apiServer := api.NewServer(state, runtimeManager)
 	apiServer.Start()
 	tradeAPI := &api.TradeAPI{Sim: sim}
 	tradeAPI.RegisterRoutes(http.DefaultServeMux)
 	api.RegisterOIEventRoutes(http.DefaultServeMux)
 	api.RegisterAuthRoutes(http.DefaultServeMux)
-	api.RegisterBrokerRoutes(http.DefaultServeMux)
-	api.StartWS(redisClient, "8081")
+	api.RegisterBrokerRoutesWithRuntime(http.DefaultServeMux, runtimeManager)
+	api.StartWS(redisClient, "8081", runtimeManager)
 
 	// ==========================
 	// WS INGESTOR

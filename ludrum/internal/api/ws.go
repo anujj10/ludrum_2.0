@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"ludrum/internal/runtime"
 	"github.com/gorilla/websocket"
 	"ludrum/internal/storage/redis"
 )
@@ -112,18 +114,30 @@ func startRedisSubscriber(redisClient *redis.RedisClient, hub *Hub, channel stri
 	}
 }
 
-func StartWS(redisClient *redis.RedisClient, port string) {
+func StartWS(redisClient *redis.RedisClient, port string, runtimeManager *runtime.Manager) {
 	hub := NewHub()
 	go hub.Run()
 
-	prefix := redisClient.GetPrefix()
-	go startRedisSubscriber(redisClient, hub, prefix+":snapshot")
-	go startRedisSubscriber(redisClient, hub, prefix+":delta")
+	if runtimeManager == nil {
+		prefix := redisClient.GetPrefix()
+		go startRedisSubscriber(redisClient, hub, prefix+":snapshot")
+		go startRedisSubscriber(redisClient, hub, prefix+":delta")
+	}
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := authorizeRequest(r); err != nil {
+		user, err := authorizeRequest(r)
+		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
+		}
+
+		var userRuntime *runtime.UserRuntime
+		if runtimeManager != nil {
+			userRuntime, err = ensureFyersRuntimeForUser(r.Context(), runtimeManager, user.ID)
+			if err != nil {
+				http.Error(w, "broker runtime unavailable", http.StatusServiceUnavailable)
+				return
+			}
 		}
 
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -141,6 +155,23 @@ func StartWS(redisClient *redis.RedisClient, port string) {
 		hub.register <- client
 
 		go func() {
+			if userRuntime != nil {
+				if payload, _, ok := userRuntime.LatestPayload(); ok {
+					raw, marshalErr := json.Marshal(map[string]interface{}{
+						"type": payload.Type,
+						"data": payload,
+					})
+					if marshalErr == nil {
+						select {
+						case <-client.done:
+							return
+						case client.send <- raw:
+						}
+					}
+				}
+				return
+			}
+
 			val, err := redisClient.GetLatestPayload()
 			if err == nil && len(val) > 0 {
 				select {
@@ -150,6 +181,42 @@ func StartWS(redisClient *redis.RedisClient, port string) {
 				}
 			}
 		}()
+
+		if userRuntime != nil {
+			go func() {
+				ticker := time.NewTicker(time.Second)
+				defer ticker.Stop()
+
+				var lastRevision uint64
+
+				for {
+					select {
+					case <-client.done:
+						return
+					case <-ticker.C:
+						payload, revision, ok := userRuntime.LatestPayload()
+						if !ok || revision == lastRevision {
+							continue
+						}
+						lastRevision = revision
+
+						raw, marshalErr := json.Marshal(map[string]interface{}{
+							"type": payload.Type,
+							"data": payload,
+						})
+						if marshalErr != nil {
+							continue
+						}
+
+						select {
+						case <-client.done:
+							return
+						case client.send <- raw:
+						}
+					}
+				}
+			}()
+		}
 
 		go func() {
 			ticker := time.NewTicker(pingPeriod)

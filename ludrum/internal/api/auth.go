@@ -16,12 +16,15 @@ import (
 	"strings"
 	"time"
 
+	"ludrum/internal/runtime"
 	"ludrum/internal/storage/postgres"
 )
 
 const authTokenHeader = "Authorization"
 
-type AuthAPI struct{}
+type AuthAPI struct{
+	RuntimeManager *runtime.Manager
+}
 
 type betaRequestPayload struct {
 	FullName     string `json:"full_name"`

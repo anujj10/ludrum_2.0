@@ -24,8 +24,11 @@ type MarketSubscription struct {
 type RuntimeConfig struct {
 	UserID          int64
 	AccountID       int64
+	AppID           string
 	BrokerUserID    string
 	AccessToken     string
 	TrackedSymbols  []string
 	OptionChainRoot string
+	StrikeCount     int
+	PollInterval    time.Duration
 }
