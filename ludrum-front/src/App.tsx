@@ -30,8 +30,36 @@ export default function App() {
   const [userAuthState, setUserAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
   const [user, setUser] = useState<AppUser | null>(null)
   const [fyersStatus, setFyersStatus] = useState<FyersStatus | null>(null)
+  const [brokerConnectMessage, setBrokerConnectMessage] = useState("")
   const hostname = window.location.hostname.toLowerCase()
   const isAdminHost = hostname === "admin.ludrum.online" || hostname.startsWith("admin.")
+
+  useEffect(() => {
+    if (isAdminHost) {
+      return
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    const broker = params.get("broker")
+    if (broker !== "fyers") {
+      return
+    }
+
+    const connected = params.get("connected")
+    const error = params.get("error")
+    if (connected === "1") {
+      setBrokerConnectMessage("FYERS returned to the platform. Refreshing broker status.")
+    } else if (error) {
+      setBrokerConnectMessage(error)
+    }
+
+    params.delete("broker")
+    params.delete("connected")
+    params.delete("error")
+    const nextQuery = params.toString()
+    const nextURL = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`
+    window.history.replaceState({}, "", nextURL)
+  }, [isAdminHost])
 
   useEffect(() => {
     if (isAdminHost) {
@@ -261,6 +289,7 @@ export default function App() {
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
     setUser(null)
     setFyersStatus(null)
+    setBrokerConnectMessage("")
     setUserAuthState("blocked")
   }
 
@@ -335,6 +364,7 @@ export default function App() {
         onLogout={handleUserLogout}
         onStartConnect={handleFyersConnectStart}
         status={fyersStatus}
+        initialMessage={brokerConnectMessage}
       />
     )
   }

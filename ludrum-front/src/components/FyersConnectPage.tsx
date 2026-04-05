@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 type FyersConnectStatus = {
   connected: boolean
@@ -13,7 +13,10 @@ type FyersConnectPageProps = {
   status: FyersConnectStatus | null
   onStartConnect: () => Promise<{ ok: boolean; error?: string }>
   onLogout: () => void
+  initialMessage?: string
 }
+
+const CONNECT_COOLDOWN_MS = 45_000
 
 function formatConnectDate(value?: string) {
   if (!value) return "-"
@@ -26,19 +29,67 @@ function formatConnectDate(value?: string) {
   })
 }
 
-export default function FyersConnectPage({ clientId, status, onStartConnect, onLogout }: FyersConnectPageProps) {
+function parseErrorMessage(message?: string) {
+  switch (message) {
+    case "token_exchange_failed":
+      return "FYERS did not finish the token exchange. Wait a bit and try connect again."
+    case "invalid_broker_state":
+      return "The FYERS session expired or was reused. Start a fresh broker connect."
+    case "missing_broker_callback_params":
+      return "FYERS did not return the required auth callback values."
+    case "account_setup_failed":
+    case "account_store_failed":
+    case "runtime_status_failed":
+      return "Your broker account could not be stored yet. Please try again."
+    case "broker_app_not_configured":
+      return "FYERS broker auth is not configured on the server."
+    default:
+      return message || ""
+  }
+}
+
+export default function FyersConnectPage({ clientId, status, onStartConnect, onLogout, initialMessage }: FyersConnectPageProps) {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState("")
+  const [cooldownUntil, setCooldownUntil] = useState(0)
+
+  useEffect(() => {
+    const parsed = parseErrorMessage(initialMessage)
+    if (parsed) {
+      setMessage(parsed)
+    }
+  }, [initialMessage])
+
+  useEffect(() => {
+    if (!cooldownUntil) return
+    const interval = window.setInterval(() => {
+      if (Date.now() >= cooldownUntil) {
+        setCooldownUntil(0)
+        window.clearInterval(interval)
+      }
+    }, 1000)
+
+    return () => window.clearInterval(interval)
+  }, [cooldownUntil])
 
   async function handleConnect() {
+    if (cooldownUntil && Date.now() < cooldownUntil) {
+      const seconds = Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 1000))
+      setMessage(`Please wait ${seconds}s before starting FYERS auth again.`)
+      return
+    }
+
     setSubmitting(true)
     setMessage("")
     const result = await onStartConnect()
     setSubmitting(false)
     if (!result.ok) {
       setMessage(result.error || "Unable to start FYERS connection right now.")
+      setCooldownUntil(Date.now() + CONNECT_COOLDOWN_MS)
     }
   }
+
+  const cooldownSeconds = cooldownUntil && Date.now() < cooldownUntil ? Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 1000)) : 0
 
   return (
     <main className="login-shell">
@@ -85,8 +136,8 @@ export default function FyersConnectPage({ clientId, status, onStartConnect, onL
             <button type="button" className="hero-btn secondary" onClick={onLogout}>
               Log out
             </button>
-            <button type="button" className="hero-btn primary submit" onClick={handleConnect} disabled={submitting}>
-              {submitting ? "Redirecting..." : status?.connected ? "Reconnect FYERS" : "Connect FYERS"}
+            <button type="button" className="hero-btn primary submit" onClick={handleConnect} disabled={submitting || cooldownSeconds > 0}>
+              {submitting ? "Redirecting..." : cooldownSeconds > 0 ? `Retry in ${cooldownSeconds}s` : status?.connected ? "Reconnect FYERS" : "Connect FYERS"}
             </button>
           </div>
 

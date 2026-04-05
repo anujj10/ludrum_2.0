@@ -133,7 +133,11 @@ func (a *AuthAPI) handleFyersConnectStart(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	loginURL = appendQueryParam(loginURL, "state", state)
+	loginURL, err = setQueryParam(loginURL, "state", state)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to prepare broker login url"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"connected":  false,
 		"status":     account.Status,
@@ -331,14 +335,14 @@ func frontendFailureURL(reason string) string {
 	return frontendBaseURL() + "/?broker=fyers&error=" + reason
 }
 
-func appendQueryParam(url, key, value string) string {
-	separator := "?"
-	if strings.Contains(url, "?") {
-		separator = "&"
+func setQueryParam(rawURL, key, value string) (string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
 	}
-	return url + separator + key + "=" + urlpkgEscape(value)
-}
 
-func urlpkgEscape(value string) string {
-	return url.QueryEscape(value)
+	query := parsed.Query()
+	query.Set(key, value)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
 }
