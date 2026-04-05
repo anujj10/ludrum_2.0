@@ -82,31 +82,45 @@ export default function App() {
     let active = true
     setUserAuthState("loading")
 
-    const loadUser = fetch(`${API_BASE_URL}/auth/me`, {
+    fetch(`${API_BASE_URL}/auth/me`, {
       headers: authHeaders(),
-    }).then(async (response) => {
-      const payload = (await response.json().catch(() => ({}))) as { user?: AppUser }
-      if (!response.ok || !payload.user?.client_id) {
-        throw new Error("invalid session")
-      }
-      return payload.user
     })
-
-    const loadFyersStatus = fetch(`${API_BASE_URL}/broker/fyers/status`, {
-      headers: authHeaders(),
-    }).then(async (response) => {
-      const payload = (await response.json().catch(() => ({}))) as FyersStatus
-      if (!response.ok) {
-        throw new Error("broker status unavailable")
-      }
-      return payload
-    })
-
-    Promise.all([loadUser, loadFyersStatus])
-      .then(([nextUser, nextStatus]) => {
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => ({}))) as { user?: AppUser }
+        if (!response.ok || !payload.user?.client_id) {
+          throw new Error("invalid session")
+        }
+        return payload.user
+      })
+      .then(async (nextUser) => {
         if (!active) return
+
         setUser(nextUser)
-        setFyersStatus(nextStatus)
+
+        try {
+          const response = await fetch(`${API_BASE_URL}/broker/fyers/status`, {
+            headers: authHeaders(),
+          })
+          const payload = (await response.json().catch(() => ({}))) as FyersStatus
+
+          if (!active) return
+
+          if (response.ok) {
+            setFyersStatus(payload)
+          } else {
+            setFyersStatus({
+              connected: false,
+              status: "unlinked",
+            })
+          }
+        } catch {
+          if (!active) return
+          setFyersStatus({
+            connected: false,
+            status: "unlinked",
+          })
+        }
+
         setUserAuthState("ready")
       })
       .catch(() => {
