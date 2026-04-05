@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,9 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"io"
 	"net/http"
-	"net/smtp"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +40,10 @@ type verifyOTPPayload struct {
 	OTP      string `json:"otp"`
 }
 
+type resendOTPPayload struct {
+	ClientID string `json:"client_id"`
+}
+
 type marketOverridePayload struct {
 	Enabled bool   `json:"enabled"`
 	Reason  string `json:"reason"`
@@ -53,6 +59,7 @@ func RegisterAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/beta-request", api.handleBetaRequest)
 	mux.HandleFunc("/auth/login", api.handleLogin)
 	mux.HandleFunc("/auth/verify-otp", api.handleVerifyOTP)
+	mux.HandleFunc("/auth/resend-otp", api.handleResendOTP)
 	mux.HandleFunc("/auth/me", api.handleMe)
 	mux.HandleFunc("/auth/logout", api.handleLogout)
 	mux.HandleFunc("/auth/admin/login", api.handleAdminLogin)
@@ -102,7 +109,7 @@ func (a *AuthAPI) handleBetaRequest(w http.ResponseWriter, r *http.Request) {
 		delivery["delivery"] = "preview"
 		delivery["client_id"] = user.ClientID
 		delivery["password"] = password
-		delivery["warning"] = "SMTP not configured, returning credentials in preview mode."
+		delivery["warning"] = "Email provider not configured, returning credentials in preview mode."
 	} else {
 		delivery["delivery"] = "email"
 	}
@@ -133,13 +140,16 @@ func (a *AuthAPI) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	otp, err := generateOTP()
+	otpLength := configuredOTPLength()
+	otpExpiry := configuredOTPExpiry()
+
+	otp, err := generateOTP(otpLength)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate otp"})
 		return
 	}
 
-	if err := postgres.SaveEmailOTP(r.Context(), user.ID, otp, time.Now().Add(10*time.Minute)); err != nil {
+	if err := postgres.SaveEmailOTP(r.Context(), user.ID, otp, time.Now().Add(otpExpiry)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store otp"})
 		return
 	}
@@ -148,12 +158,12 @@ func (a *AuthAPI) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("OTP sent to %s", user.Email),
 	}
 
-	subject := "Your Index Options login OTP"
-	body := fmt.Sprintf("Hello %s,\n\nYour login OTP is %s.\nIt expires in 10 minutes.\n", user.FullName, otp)
+	subject := "Your Ludrum verification code"
+	body := fmt.Sprintf("Hello %s,\n\nYour Ludrum verification code is %s.\nIt expires in %d minutes.\n\nDo not share this code with anyone.\n", user.FullName, otp, int(otpExpiry/time.Minute))
 	if err := sendEmail(user.Email, subject, body); err != nil {
 		delivery["delivery"] = "preview"
 		delivery["otp_preview"] = otp
-		delivery["warning"] = "SMTP not configured, returning OTP in preview mode."
+		delivery["warning"] = "Email provider not configured, returning OTP in preview mode."
 	} else {
 		delivery["delivery"] = "email"
 	}
@@ -198,6 +208,64 @@ func (a *AuthAPI) handleVerifyOTP(w http.ResponseWriter, r *http.Request) {
 			"full_name": user.FullName,
 		},
 	})
+}
+
+func (a *AuthAPI) handleResendOTP(w http.ResponseWriter, r *http.Request) {
+	allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	var payload resendOTPPayload
+	if err := decodeJSON(r, &payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	user, err := postgres.GetBetaUserByClientID(r.Context(), payload.ClientID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "client account not found"})
+		return
+	}
+	if strings.TrimSpace(user.Status) != "active" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "client account is not active"})
+		return
+	}
+
+	otpLength := configuredOTPLength()
+	otpExpiry := configuredOTPExpiry()
+
+	otp, err := generateOTP(otpLength)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate otp"})
+		return
+	}
+
+	if err := postgres.SaveEmailOTP(r.Context(), user.ID, otp, time.Now().Add(otpExpiry)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store otp"})
+		return
+	}
+
+	delivery := map[string]interface{}{
+		"message": fmt.Sprintf("A new OTP has been sent to %s", user.Email),
+	}
+
+	subject := "Your Ludrum verification code"
+	body := fmt.Sprintf("Hello %s,\n\nYour Ludrum verification code is %s.\nIt expires in %d minutes.\n\nDo not share this code with anyone.\n", user.FullName, otp, int(otpExpiry/time.Minute))
+	if err := sendEmail(user.Email, subject, body); err != nil {
+		delivery["delivery"] = "preview"
+		delivery["otp_preview"] = otp
+		delivery["warning"] = "Email provider not configured, returning OTP in preview mode."
+	} else {
+		delivery["delivery"] = "email"
+	}
+
+	writeJSON(w, http.StatusOK, delivery)
 }
 
 func (a *AuthAPI) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -523,8 +591,11 @@ func signAdminPayload(payload, secret string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func generateOTP() (string, error) {
-	return randomDigits(6)
+func generateOTP(length int) (string, error) {
+	if length <= 0 {
+		length = 6
+	}
+	return randomDigits(length)
 }
 
 func randomDigits(length int) (string, error) {
@@ -564,39 +635,59 @@ func decodeJSON(r *http.Request, target interface{}) error {
 }
 
 func sendEmail(to, subject, body string) error {
-	host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
-	port := strings.TrimSpace(os.Getenv("SMTP_PORT"))
-	username := strings.TrimSpace(os.Getenv("SMTP_USER"))
-	password := strings.TrimSpace(os.Getenv("SMTP_PASS"))
-	from := strings.TrimSpace(os.Getenv("SMTP_FROM"))
-
-	if host == "" || port == "" || from == "" {
-		return fmt.Errorf("smtp not configured")
+	apiKey := strings.TrimSpace(os.Getenv("RESEND_API_KEY"))
+	from := strings.TrimSpace(os.Getenv("RESEND_FROM_EMAIL"))
+	if apiKey == "" || from == "" {
+		return fmt.Errorf("resend not configured")
 	}
 
-	addr := host + ":" + port
-	headers := map[string]string{
-		"From":         from,
-		"To":           to,
-		"Subject":      subject,
-		"MIME-Version": "1.0",
-		"Content-Type": "text/plain; charset=UTF-8",
+	payload := map[string]interface{}{
+		"from":    from,
+		"to":      []string{to},
+		"subject": subject,
+		"text":    body,
 	}
 
-	var builder strings.Builder
-	for key, value := range headers {
-		builder.WriteString(key)
-		builder.WriteString(": ")
-		builder.WriteString(value)
-		builder.WriteString("\r\n")
-	}
-	builder.WriteString("\r\n")
-	builder.WriteString(body)
-
-	var auth smtp.Auth
-	if username != "" && password != "" {
-		auth = smtp.PlainAuth("", username, password, host)
+	rawBody, err := json.Marshal(payload)
+	if err != nil {
+		return err
 	}
 
-	return smtp.SendMail(addr, auth, from, []string{to}, []byte(builder.String()))
+	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(rawBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+
+	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return fmt.Errorf("resend send failed: %s", strings.TrimSpace(string(responseBody)))
+}
+
+func configuredOTPExpiry() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("OTP_EXPIRY_MINUTES")); raw != "" {
+		if minutes, err := strconv.Atoi(raw); err == nil && minutes > 0 {
+			return time.Duration(minutes) * time.Minute
+		}
+	}
+	return 5 * time.Minute
+}
+
+func configuredOTPLength() int {
+	if raw := strings.TrimSpace(os.Getenv("OTP_LENGTH")); raw != "" {
+		if length, err := strconv.Atoi(raw); err == nil && length >= 4 && length <= 9 {
+			return length
+		}
+	}
+	return 6
 }

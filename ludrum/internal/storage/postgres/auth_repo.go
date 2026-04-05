@@ -246,6 +246,26 @@ func AuthenticateClient(ctx context.Context, clientID, password string) (*BetaUs
 	return &user, nil
 }
 
+func GetBetaUserByClientID(ctx context.Context, clientID string) (*BetaUser, error) {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return nil, ErrInvalidCredentials
+	}
+
+	var user BetaUser
+	err := DB.QueryRow(
+		ctx,
+		`SELECT id, full_name, email, phone, trading_style, client_id, status, created_at, updated_at
+		 FROM beta_users WHERE client_id = $1`,
+		clientID,
+	).Scan(&user.ID, &user.FullName, &user.Email, &user.Phone, &user.TradingStyle, &user.ClientID, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	if err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	return &user, nil
+}
+
 func SaveEmailOTP(ctx context.Context, userID int64, otp string, expiresAt time.Time) error {
 	_, err := DB.Exec(
 		ctx,

@@ -13,6 +13,7 @@ export default function LoginPage({ onAuthenticated }: LoginPageProps) {
   const [otp, setOTP] = useState("")
   const [message, setMessage] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [resending, setResending] = useState(false)
 
   async function handleCredentialsSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -88,6 +89,39 @@ export default function LoginPage({ onAuthenticated }: LoginPageProps) {
     }
   }
 
+  async function handleResendOTP() {
+    setResending(true)
+    setMessage("")
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/resend-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+        }),
+      })
+
+      const payload = (await response.json()) as {
+        error?: string
+        message?: string
+        otp_preview?: string
+        warning?: string
+      }
+
+      if (!response.ok) {
+        setMessage(payload.error || "Unable to resend OTP")
+        return
+      }
+
+      setMessage(payload.warning ? `${payload.message} ${payload.warning}${payload.otp_preview ? ` OTP: ${payload.otp_preview}` : ""}` : payload.message || "OTP resent")
+    } catch {
+      setMessage("OTP resend failed")
+    } finally {
+      setResending(false)
+    }
+  }
+
   return (
     <main className="login-shell">
       <section className="login-panel">
@@ -134,6 +168,9 @@ export default function LoginPage({ onAuthenticated }: LoginPageProps) {
               <div className="otp-actions">
                 <button type="button" className="hero-btn secondary" onClick={() => setStep("credentials")}>
                   Change credentials
+                </button>
+                <button type="button" className="hero-btn secondary" onClick={handleResendOTP} disabled={resending || submitting}>
+                  {resending ? "Resending..." : "Resend OTP"}
                 </button>
                 <button type="submit" className="hero-btn primary submit" disabled={submitting}>
                   {submitting ? "Verifying..." : "Verify & Enter"}
