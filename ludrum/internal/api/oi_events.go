@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"ludrum/internal/runtime"
 	"ludrum/internal/storage/postgres"
 )
 
@@ -18,7 +19,10 @@ type oiEventRow struct {
 	LTPChange  float64   `json:"ltp_change"`
 }
 
-func RegisterOIEventRoutes(mux *http.ServeMux) {
+var oiEventRuntimeManager *runtime.Manager
+
+func RegisterOIEventRoutes(mux *http.ServeMux, runtimeManager *runtime.Manager) {
+	oiEventRuntimeManager = runtimeManager
 	mux.HandleFunc("/oi-events", handleOIEvents)
 }
 
@@ -29,7 +33,8 @@ func handleOIEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := authorizeRequest(r); err != nil {
+	user, err := authorizeRequest(r)
+	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
@@ -65,6 +70,15 @@ func handleOIEvents(w http.ResponseWriter, r *http.Request) {
 	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
 		if parsed, err := strconv.Atoi(rawLimit); err == nil && parsed > 0 && parsed <= 50 {
 			limit = parsed
+		}
+	}
+
+	if oiEventRuntimeManager != nil && user != nil {
+		if userRuntime, runtimeErr := ensureFyersRuntimeForUser(r.Context(), oiEventRuntimeManager, user.ID); runtimeErr == nil {
+			if events := userRuntime.GetOIEvents(symbol, strikes, limit); len(events) > 0 {
+				writeJSON(w, http.StatusOK, events)
+				return
+			}
 		}
 	}
 

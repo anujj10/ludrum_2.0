@@ -64,6 +64,7 @@ func main() {
 	// ================= API + WS =================
 	apiServer := api.NewServer(state, nil)
 	apiServer.Start()
+	api.RegisterOIEventRoutes(http.DefaultServeMux, nil)
 	api.StartWS(redisClient, "8083", nil)
 
 	// ================= REPLAY CONFIG =================

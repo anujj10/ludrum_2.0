@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"log"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +29,7 @@ type UserRuntime struct {
 	cancel     context.CancelFunc
 	pipeline   *processor.Pipeline
 	sim        *simulator.Simulator
+	oiEvents   map[string][]OIEvent
 }
 
 func NewUserRuntime(config fyers.RuntimeConfig) *UserRuntime {
@@ -35,6 +38,7 @@ func NewUserRuntime(config fyers.RuntimeConfig) *UserRuntime {
 		state:  "pending",
 		pipeline: processor.NewPipeline(),
 		sim: simulator.NewSimulator(),
+		oiEvents: make(map[string][]OIEvent),
 	}
 }
 
@@ -136,6 +140,15 @@ type Snapshot struct {
 	LastWSConnectAt *time.Time
 }
 
+type OIEvent struct {
+	Time       time.Time `json:"time"`
+	Symbol     string    `json:"symbol"`
+	Strike     float64   `json:"strike"`
+	OptionType string    `json:"option_type"`
+	OIChange   int64     `json:"oi_change"`
+	LTPChange  float64   `json:"ltp_change"`
+}
+
 func (r *UserRuntime) run(ctx context.Context) {
 	defer func() {
 		r.mu.Lock()
@@ -209,6 +222,7 @@ func (r *UserRuntime) runCycle(ctx context.Context) error {
 	r.lastTickAt = &now
 	r.latestPayload = streamPayload
 	r.hasPayload = true
+	r.recordOIEvents(snap.Symbol, now, streamPayload.Pairs)
 	r.revision++
 	r.mu.Unlock()
 
@@ -223,4 +237,96 @@ func (r *UserRuntime) writeRuntimeStatus(ctx context.Context, state, lastError s
 
 	_, err := postgres.UpsertUserRuntimeStatus(ctx, r.config.UserID, r.config.AccountID, state, lastWSConnectAt, lastTickAt, lastError)
 	return err
+}
+
+func (r *UserRuntime) GetOIEvents(symbol string, strikes []float64, limit int) []OIEvent {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 12
+	}
+
+	result := make([]OIEvent, 0, len(strikes)*2*limit)
+	for _, strike := range strikes {
+		for _, optionType := range []string{"CE", "PE"} {
+			key := oiEventKey(symbol, strike, optionType)
+			entries := r.oiEvents[key]
+			if len(entries) == 0 {
+				continue
+			}
+			result = append(result, recentOIEvents(entries, limit)...)
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Strike == result[j].Strike {
+			if result[i].OptionType == result[j].OptionType {
+				return result[i].Time.After(result[j].Time)
+			}
+			return result[i].OptionType < result[j].OptionType
+		}
+		return result[i].Strike < result[j].Strike
+	})
+
+	return result
+}
+
+func (r *UserRuntime) recordOIEvents(symbol string, ts time.Time, pairs []models.PairSignal) {
+	for _, pair := range pairs {
+		if pair.CE.OIChange != 0 {
+			key := oiEventKey(symbol, pair.Strike, "CE")
+			r.oiEvents[key] = appendOIEvent(r.oiEvents[key], OIEvent{
+				Time:       ts,
+				Symbol:     symbol,
+				Strike:     pair.Strike,
+				OptionType: "CE",
+				OIChange:   pair.CE.OIChange,
+				LTPChange:  pair.CE.LTPChange,
+			})
+		}
+		if pair.PE.OIChange != 0 {
+			key := oiEventKey(symbol, pair.Strike, "PE")
+			r.oiEvents[key] = appendOIEvent(r.oiEvents[key], OIEvent{
+				Time:       ts,
+				Symbol:     symbol,
+				Strike:     pair.Strike,
+				OptionType: "PE",
+				OIChange:   pair.PE.OIChange,
+				LTPChange:  pair.PE.LTPChange,
+			})
+		}
+	}
+}
+
+func appendOIEvent(existing []OIEvent, next OIEvent) []OIEvent {
+	if len(existing) > 0 {
+		last := existing[len(existing)-1]
+		if last.OIChange == next.OIChange && last.LTPChange == next.LTPChange {
+			return existing
+		}
+	}
+
+	existing = append(existing, next)
+	const maxOIEvents = 24
+	if len(existing) > maxOIEvents {
+		existing = existing[len(existing)-maxOIEvents:]
+	}
+	return existing
+}
+
+func recentOIEvents(entries []OIEvent, limit int) []OIEvent {
+	start := 0
+	if len(entries) > limit {
+		start = len(entries) - limit
+	}
+	out := append([]OIEvent(nil), entries[start:]...)
+	for left, right := 0, len(out)-1; left < right; left, right = left+1, right-1 {
+		out[left], out[right] = out[right], out[left]
+	}
+	return out
+}
+
+func oiEventKey(symbol string, strike float64, optionType string) string {
+	return symbol + "|" + optionType + "|" + strconv.FormatFloat(strike, 'f', 2, 64)
 }

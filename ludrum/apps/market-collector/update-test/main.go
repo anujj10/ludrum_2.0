@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -118,6 +119,7 @@ func main() {
 	// ==========================
 	apiServer := api.NewServer(state, nil)
 	apiServer.Start()
+	api.RegisterOIEventRoutes(http.DefaultServeMux, nil)
 
 	api.StartWS(redisClient, "8082", nil)
 
