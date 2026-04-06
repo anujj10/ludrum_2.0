@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useOptionStore } from "../store/useOptionStore"
 import { API_BASE_URL, authHeaders } from "../config"
-import type { OIChangeEvent, PairSignal, StrikeAnalytics } from "../types/option"
+import type { OIChangeEvent, PairSignal, StreamData, StrikeAnalytics } from "../types/option"
 
 const STRIKE_STEP = 50
 
@@ -28,6 +28,37 @@ type RuntimeStatus = {
   pair_count: number
   last_tick_at?: string
   last_error?: string
+}
+
+type TerminalCachePayload = {
+  savedAt: string
+  snapshot: StreamData
+  oiHistoryMap: OIHistoryMap
+}
+
+function terminalCacheKey(clientId: string) {
+  return `index-options-terminal-cache:${clientId}`
+}
+
+function readTerminalCache(clientId: string): TerminalCachePayload | null {
+  try {
+    const raw = window.localStorage.getItem(terminalCacheKey(clientId))
+    if (!raw) return null
+
+    const parsed = JSON.parse(raw) as TerminalCachePayload
+    if (!parsed || typeof parsed !== "object") return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeTerminalCache(clientId: string, payload: TerminalCachePayload) {
+  try {
+    window.localStorage.setItem(terminalCacheKey(clientId), JSON.stringify(payload))
+  } catch {
+    // Ignore storage quota / serialization issues and keep live flow healthy.
+  }
 }
 
 function appendOIHistoryEntry(entries: OIChangeEntry[] | undefined, value: number | undefined) {
@@ -378,6 +409,7 @@ export default function OptionTable({
   const [reconnectingBroker, setReconnectingBroker] = useState(false)
   const [profileMessage, setProfileMessage] = useState("")
   const hydrate = useOptionStore((state) => state.hydrate)
+  const reset = useOptionStore((state) => state.reset)
   const strikeMap = useOptionStore((state) => state.strikeMap)
   const spot = useOptionStore((state) => state.spot)
   const lastType = useOptionStore((state) => state.lastType)
@@ -401,6 +433,25 @@ export default function OptionTable({
     return Math.abs(pair.Strike - spot) < Math.abs(closest.Strike - spot) ? pair : closest
   }, null)
   const mergedOIHistoryMap = mergeOIHistoryMaps(oiHistoryMap, runtimeOIHistoryMap)
+
+  useEffect(() => {
+    reset()
+    setOIHistoryMap({})
+    setRuntimeOIHistoryMap({})
+
+    const cached = readTerminalCache(clientId)
+    if (!cached) {
+      return
+    }
+
+    if (cached.snapshot?.pairs?.length || cached.snapshot?.spot) {
+      hydrate(cached.snapshot, "snapshot")
+    }
+
+    if (cached.oiHistoryMap) {
+      setOIHistoryMap(cached.oiHistoryMap)
+    }
+  }, [clientId, hydrate, reset])
 
   useEffect(() => {
     let active = true
@@ -462,9 +513,7 @@ export default function OptionTable({
 
         setOIHistoryMap(buildOIHistoryMap(payload))
       } catch {
-        if (active) {
-          setOIHistoryMap({})
-        }
+        // Keep the last good OI history from DB/local cache on transient failures.
       }
     }
 
@@ -478,6 +527,22 @@ export default function OptionTable({
       window.clearInterval(interval)
     }
   }, [displayStrikes.join(",")])
+
+  useEffect(() => {
+    const pairs = Object.values(strikeMap).sort((a, b) => a.Strike - b.Strike)
+    if (!pairs.length && !spot) {
+      return
+    }
+
+    writeTerminalCache(clientId, {
+      savedAt: new Date().toISOString(),
+      snapshot: {
+        spot,
+        pairs,
+      },
+      oiHistoryMap: mergedOIHistoryMap,
+    })
+  }, [clientId, mergedOIHistoryMap, spot, strikeMap])
 
   useEffect(() => {
     if (!displayStrikes.length) return

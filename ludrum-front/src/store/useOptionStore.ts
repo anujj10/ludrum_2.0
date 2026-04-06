@@ -10,6 +10,7 @@ type State = {
   portfolio: Portfolio | null
   lastType: "snapshot" | "delta" | null
   hydrate: (payload: StreamData, mode: "snapshot" | "delta") => void
+  reset: () => void
 }
 
 const EMPTY_PORTFOLIO: Portfolio = {
@@ -133,6 +134,17 @@ export const useOptionStore = create<State>()(
             portfolio: payload.portfolio ?? state.portfolio,
             lastType: mode,
           }
+        })
+      },
+
+      reset: () => {
+        set({
+          strikeMap: {},
+          spot: 0,
+          openPositions: [],
+          closedPositions: [],
+          portfolio: EMPTY_PORTFOLIO,
+          lastType: null,
         })
       },
     }),
