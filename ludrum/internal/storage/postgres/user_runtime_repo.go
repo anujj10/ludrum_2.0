@@ -49,6 +49,8 @@ func LoadLatestUserRuntimeSnapshot(ctx context.Context, userID, accountID int64)
 		return models.StreamPayload{}, false, nil
 	}
 
+	sessionStart := CurrentMarketSessionStartUTC(time.Now().UTC())
+
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -58,11 +60,13 @@ func LoadLatestUserRuntimeSnapshot(ctx context.Context, userID, accountID int64)
 		SELECT payload_json
 		FROM user_runtime_snapshots
 		WHERE user_id = $1 AND account_id = $2
+		  AND time >= $3
 		ORDER BY time DESC
 		LIMIT 1
 		`,
 		userID,
 		accountID,
+		sessionStart,
 	)
 
 	var body []byte
@@ -123,6 +127,8 @@ func LoadUserRuntimeOIEvents(ctx context.Context, userID, accountID int64, symbo
 		limit = 12
 	}
 
+	sessionStart := CurrentMarketSessionStartUTC(time.Now().UTC())
+
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -146,16 +152,18 @@ func LoadUserRuntimeOIEvents(ctx context.Context, userID, accountID int64, symbo
 			  AND account_id = $2
 			  AND symbol = $3
 			  AND strike = ANY($4)
+			  AND time >= $5
 		)
 		SELECT time, symbol, strike, option_type, oi_change, ltp_change
 		FROM ranked
-		WHERE rn <= $5
+		WHERE rn <= $6
 		ORDER BY strike ASC, option_type ASC, time DESC
 		`,
 		userID,
 		accountID,
 		symbol,
 		strikes,
+		sessionStart,
 		limit,
 	)
 	if err != nil {

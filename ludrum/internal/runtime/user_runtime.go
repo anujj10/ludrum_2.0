@@ -274,11 +274,13 @@ func (r *UserRuntime) GetOIEvents(symbol string, strikes []float64, limit int) [
 		limit = 12
 	}
 
+	sessionStart := postgres.CurrentMarketSessionStartUTC(time.Now().UTC())
+
 	result := make([]OIEvent, 0, len(strikes)*2*limit)
 	for _, strike := range strikes {
 		for _, optionType := range []string{"CE", "PE"} {
 			key := oiEventKey(symbol, strike, optionType)
-			entries := r.oiEvents[key]
+			entries := filterOIEventsSince(r.oiEvents[key], sessionStart)
 			if len(entries) == 0 {
 				continue
 			}
@@ -370,4 +372,19 @@ func recentOIEvents(entries []OIEvent, limit int) []OIEvent {
 
 func oiEventKey(symbol string, strike float64, optionType string) string {
 	return symbol + "|" + optionType + "|" + strconv.FormatFloat(strike, 'f', 2, 64)
+}
+
+func filterOIEventsSince(entries []OIEvent, cutoff time.Time) []OIEvent {
+	if len(entries) == 0 {
+		return entries
+	}
+
+	filtered := entries[:0]
+	for _, entry := range entries {
+		if !entry.Time.Before(cutoff) {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	return filtered
 }

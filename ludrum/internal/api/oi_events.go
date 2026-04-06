@@ -120,14 +120,16 @@ func handleOIEvents(w http.ResponseWriter, r *http.Request) {
 			FROM option_oi_change_events
 			WHERE symbol = $1
 			  AND strike = ANY($2)
+			  AND time >= $3
 		)
 		SELECT time, symbol, strike, option_type, oi_change, ltp_change
 		FROM ranked
-		WHERE rn <= $3
+		WHERE rn <= $4
 		ORDER BY strike ASC, option_type ASC, time DESC
 		`,
 		symbol,
 		strikes,
+		postgres.CurrentMarketSessionStartUTC(time.Now().UTC()),
 		limit,
 	)
 	if err != nil {
