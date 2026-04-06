@@ -50,19 +50,15 @@ func (c *snapshotCache) Get() ([]storageTypes.DBOption, bool) {
 }
 
 func main() {
-
 	mode := os.Getenv("MODE")
 	if mode == "" {
 		mode = "live"
 	}
-	log.Println("🚀 Starting LIVE mode...")
+	log.Println("Starting LIVE mode...")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// ==========================
-	// INIT
-	// ==========================
 	postgres.InitDB()
 
 	cfg := config.LoadConfig()
@@ -82,74 +78,98 @@ func main() {
 	sim := simulator.NewSimulator()
 	liveSnapshotCache := &snapshotCache{}
 
-	// ==========================
-	// 🔥 LTP SERIES ENGINE
-	// ==========================
 	atmTracker := ltpSeries.NewATMTracker(50)
-
-	selector := ltpSeries.NewStrikeSelector(
-		2,       // ±2 strikes
-		"24APR", // expiry
-		50,
-	)
-
+	selector := ltpSeries.NewStrikeSelector(2, "24APR", 50)
 	ltpStore := ltpSeries.NewMarketStore(5)
 	fetcher := ltpSeries.NewFyersFetcher(fyModel)
 	poller := ltpSeries.NewLTPPoller(fetcher, ltpStore)
-
 	ltpEngine := ltpSeries.NewLTPEngine(atmTracker, selector, poller)
-	isMarketHours := isIndianMarketOpen(time.Now())
 
-	// start poller once
-	if isMarketHours {
-		ltpEngine.Start(ctx)
-	}
+	store := processor.NewMarketStore()
+	wsIngestor := optionData.NewWSIngestor(
+		store,
+		pipeline,
+		state,
+		redisClient,
+		dbWorker,
+		sim,
+	)
+	wsIngestor.SetOnTick(func(ltp float64) {
+		ltpEngine.OnIndexTick(ltp)
+	})
 
-	// ==========================
-	// 🔥 LTP → ALPHA → REDIS LOOP
-	// ==========================
-	if isMarketHours {
-		go func() {
-			ticker := time.NewTicker(1 * time.Second)
-			defer ticker.Stop()
+	var collectorsOnce sync.Once
+	startCollectors := func() {
+		collectorsOnce.Do(func() {
+			log.Println("Market open: starting live collectors.")
+			ltpEngine.Start(ctx)
 
-			for {
-				select {
-				case <-ctx.Done():
-					return
+			go wsIngestor.Start(ctx, cfg.AppID, cfg.AccessToken, []string{"NSE:NIFTY50-INDEX"})
 
-				case <-ticker.C:
+			go func() {
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
 
-					for symbol := range poller.GetTrackedSymbols() {
-
-						state := ltpStore.GetState(symbol)
-						if state == nil {
-							continue
-						}
-
-						alpha := processor.ComputeAlphaFromLTP(state.History)
-
-						payload := map[string]interface{}{
-							"symbol": symbol,
-							"alpha":  alpha,
-						}
-						log.Println("LTP ALPHA:", symbol, alpha.Signal)
-
-						redisClient.PublishLTP(payload)
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						runLivePipeline(fyModel, pipeline, state, redisClient, dbWorker, sim, liveSnapshotCache)
 					}
 				}
-			}
-		}()
+			}()
+
+			go func() {
+				ticker := time.NewTicker(1 * time.Minute)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						snapshotRows, ok := liveSnapshotCache.Get()
+						if !ok {
+							continue
+						}
+						go postgres.SaveMinuteSnapshots(snapshotRows)
+						if len(snapshotRows) > 0 {
+							log.Printf("Persisted %d market snapshot rows @ %s", len(snapshotRows), snapshotRows[0].Time.Format("15:04:05"))
+						}
+					}
+				}
+			}()
+
+			go func() {
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						for symbol := range poller.GetTrackedSymbols() {
+							pollState := ltpStore.GetState(symbol)
+							if pollState == nil {
+								continue
+							}
+
+							alpha := processor.ComputeAlphaFromLTP(pollState.History)
+							payload := map[string]interface{}{
+								"symbol": symbol,
+								"alpha":  alpha,
+							}
+							log.Println("LTP ALPHA:", symbol, alpha.Signal)
+							redisClient.PublishLTP(payload)
+						}
+					}
+				}
+			}()
+		})
 	}
 
-	// ==========================
-	// EXISTING MARKET STORE
-	// ==========================
-	store := processor.NewMarketStore()
-
-	// ==========================
-	// API + WS
-	// ==========================
 	apiServer := api.NewServer(state, runtimeManager)
 	apiServer.Start()
 	tradeAPI := &api.TradeAPI{Sim: sim}
@@ -159,73 +179,28 @@ func main() {
 	api.RegisterBrokerRoutesWithRuntime(http.DefaultServeMux, runtimeManager)
 	api.StartWS(redisClient, "8081", runtimeManager)
 
-	// ==========================
-	// WS INGESTOR
-	// ==========================
-	wsIngestor := optionData.NewWSIngestor(
-		store,
-		pipeline,
-		state,
-		redisClient,
-		dbWorker,
-		sim,
-	)
-
-	// connect WS → LTP engine
-	wsIngestor.SetOnTick(func(ltp float64) {
-		ltpEngine.OnIndexTick(ltp)
-	})
-
-	if isMarketHours {
-		go wsIngestor.Start(ctx, cfg.AppID, cfg.AccessToken, []string{"NSE:NIFTY50-INDEX"})
-
-		// ==========================
-		// REST FETCH + UI BROADCAST (1s)
-		// ==========================
-		go func() {
-			ticker := time.NewTicker(1 * time.Second)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					runLivePipeline(fyModel, pipeline, state, redisClient, dbWorker, sim, liveSnapshotCache)
-				}
-			}
-		}()
-
-		// ==========================
-		// MARKET SNAPSHOT PERSIST (1m)
-		// ==========================
-		go func() {
-			ticker := time.NewTicker(1 * time.Minute)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					snapshotRows, ok := liveSnapshotCache.Get()
-					if !ok {
-						continue
-					}
-					go postgres.SaveMinuteSnapshots(snapshotRows)
-					if len(snapshotRows) > 0 {
-						log.Printf("Persisted %d market snapshot rows @ %s", len(snapshotRows), snapshotRows[0].Time.Format("15:04:05"))
-					}
-				}
-			}
-		}()
+	if isIndianMarketOpen(time.Now()) {
+		startCollectors()
 	} else {
 		log.Println("Market closed: auth/API stays online, live collectors paused.")
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if isIndianMarketOpen(time.Now()) {
+						startCollectors()
+						return
+					}
+				}
+			}
+		}()
 	}
 
-	// ==========================
-	// SHUTDOWN
-	// ==========================
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -240,9 +215,6 @@ func main() {
 	log.Println("Shutdown complete")
 }
 
-// ==========================
-// SNAPSHOT PIPELINE
-// ==========================
 func runLivePipeline(
 	fyModel *fyersgosdk.FyersModel,
 	pipeline *processor.Pipeline,
@@ -259,11 +231,11 @@ func runLivePipeline(
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Println(" Recovered from pipeline panic:", r)
+			log.Println("Recovered from pipeline panic:", r)
 		}
 	}()
-	start := time.Now()
 
+	start := time.Now()
 	raw, err := optionData.OptionsData("NSE:NIFTY50-INDEX", "", 3, fyModel)
 	if err != nil {
 		log.Println("API error:", err)
@@ -280,20 +252,15 @@ func runLivePipeline(
 		return
 	}
 	if parsed == nil || len(parsed.Data.OptionsChain) == 0 {
-		log.Println(" Invalid parsed data")
+		log.Println("Invalid parsed data")
 		return
 	}
-	// ==========================
-	// HOT PATH DB EVENT TRACKING
-	// ==========================
+
 	dbOptions := postgres.ConvertToDBOptions(parsed.Data.OptionsChain)
 	liveSnapshotCache.Set(dbOptions)
 	go postgres.SaveOptionsBatch(dbOptions)
 	go postgres.SaveOptionsAndOIEvents(dbOptions)
 
-	// ==========================
-	// EXISTING PIPELINE (UNCHANGED)
-	// ==========================
 	snap := processor.BuildMarketSnapshot(parsed)
 	if snap == nil {
 		log.Println("Snapshot build failed")
@@ -301,38 +268,22 @@ func runLivePipeline(
 	}
 	snap.Timestamp = time.Now().Unix()
 
-	// ==========================
-	// 🔥 BUILD OPTIONS CHAIN
-	// ==========================
 	optionsChain := processor.BuildOptionsChainPayload(snap, 200)
-
-	// publish to redis
 	data, _ := json.Marshal(optionsChain)
-
-	// store latest
 	mode := "live"
 	redisClient.Client.Set(context.Background(), mode+"latest:options_chain", data, 0)
-
-	// publish
 	redisClient.Publish("options_chain", optionsChain)
 
 	payloadRaw := pipeline.Process(snap, sim)
 	go redisClient.PublishPayloadWithType(payloadRaw, payloadRaw.Type)
 	go redisClient.PublishPayloadStream(payloadRaw)
 
-	// redisClient.Publish("options_chain", map[string]interface{}{
-	// "debug": "hello_from_backend",
-	// "time":  time.Now().Unix(),
-	// })
-
-	// (optional: keep for future analytics DB)
 	dbWorker.PairChan <- payloadRaw.Pairs
-
 	state.UpdatePairs(payloadRaw.Pairs, snap.Timestamp)
-	log.Println(" BUILDING OPTIONS CHAIN")
-	optionsChain2 := processor.BuildOptionsChainPayload(snap, 200)
-	log.Println(" PUBLISHING options_chain", len(optionsChain2.Strikes))
 
+	optionsChain2 := processor.BuildOptionsChainPayload(snap, 200)
+	log.Println("BUILDING OPTIONS CHAIN")
+	log.Println("PUBLISHING options_chain", len(optionsChain2.Strikes))
 	log.Println("Options count:", len(parsed.Data.OptionsChain))
 	log.Println("Strikes built:", len(snap.Strikes))
 	log.Println("Pairs to DB:", len(payloadRaw.Pairs))
