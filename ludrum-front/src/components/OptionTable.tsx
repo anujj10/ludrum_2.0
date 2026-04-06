@@ -20,6 +20,16 @@ type BrokerStatus = {
   last_connected_at?: string
 }
 
+type RuntimeStatus = {
+  connected: boolean
+  status: string
+  runtime_state: string
+  has_payload: boolean
+  pair_count: number
+  last_tick_at?: string
+  last_error?: string
+}
+
 function appendOIHistoryEntry(entries: OIChangeEntry[] | undefined, value: number | undefined) {
   if (value === undefined || value === null || Number.isNaN(value) || value === 0) {
     return entries ?? []
@@ -160,6 +170,7 @@ function formatEventTime(value: string) {
 
 function buildOIHistoryMap(events: OIChangeEvent[]) {
   const grouped: OIHistoryMap = {}
+  const seen = new Set<string>()
 
   for (const event of events) {
     const strike = Number(event.strike)
@@ -167,9 +178,16 @@ function buildOIHistoryMap(events: OIChangeEvent[]) {
       grouped[strike] = { CE: [], PE: [] }
     }
 
+    const formattedTime = formatEventTime(event.time)
+    const dedupeKey = `${strike}|${event.option_type}|${event.oi_change}|${formattedTime}`
+    if (seen.has(dedupeKey)) {
+      continue
+    }
+    seen.add(dedupeKey)
+
     grouped[strike][event.option_type].push({
       value: event.oi_change,
-      time: formatEventTime(event.time),
+      time: formattedTime,
     })
   }
 
@@ -312,6 +330,7 @@ export default function OptionTable({
   email,
   clientId,
   fyersStatus,
+  runtimeStatus,
   onLogout,
   onReconnectBroker,
 }: {
@@ -319,6 +338,7 @@ export default function OptionTable({
   email?: string
   clientId: string
   fyersStatus: BrokerStatus
+  runtimeStatus?: RuntimeStatus | null
   onLogout: () => void
   onReconnectBroker: () => Promise<{ ok: boolean; error?: string }>
 }) {
@@ -485,14 +505,21 @@ export default function OptionTable({
               <span>ATM</span>
               <strong>{atm ? formatNumber(atm.Strike, 0) : "-"}</strong>
             </div>
+            <div className="status-card">
+              <span>Runtime</span>
+              <strong>{runtimeStatus?.runtime_state || "pending"}</strong>
+              <small>{runtimeStatus?.has_payload ? `${runtimeStatus.pair_count} pairs` : "warming"}</small>
+            </div>
           </div>
           <div className="session-card">
             <div className="session-copy">
               <span className="session-kicker">Signed in as</span>
               <strong>{clientId}</strong>
               <span className="session-meta">FYERS {fyersStatus.connected ? "linked" : fyersStatus.status || "unlinked"}</span>
+              <span className="session-meta">Runtime: {runtimeStatus?.runtime_state || "pending"}</span>
               <span className="session-meta">Broker user: {fyersStatus.broker_user_id || "-"}</span>
               <span className="session-meta">Last linked: {formatStatusDate(fyersStatus.last_connected_at)}</span>
+              <span className="session-meta">Last tick: {formatStatusDate(runtimeStatus?.last_tick_at)}</span>
             </div>
             <div className="session-actions">
               <button
@@ -533,6 +560,18 @@ export default function OptionTable({
                 <article>
                   <span>Token expiry</span>
                   <strong>{formatStatusDate(fyersStatus.token_expires_at)}</strong>
+                </article>
+                <article>
+                  <span>Runtime state</span>
+                  <strong>{runtimeStatus?.runtime_state || "pending"}</strong>
+                </article>
+                <article>
+                  <span>Runtime payload</span>
+                  <strong>{runtimeStatus?.has_payload ? `${runtimeStatus.pair_count} pairs` : "warming up"}</strong>
+                </article>
+                <article>
+                  <span>Last runtime error</span>
+                  <strong>{runtimeStatus?.last_error || "-"}</strong>
                 </article>
               </div>
               <div className="profile-actions">
