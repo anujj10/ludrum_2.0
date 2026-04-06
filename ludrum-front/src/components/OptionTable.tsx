@@ -52,6 +52,26 @@ function appendOIHistoryEntry(entries: OIChangeEntry[] | undefined, value: numbe
   return [...entries.slice(-11), nextEntry]
 }
 
+function dedupeOIEntries(entries: OIChangeEntry[] | undefined) {
+  if (!entries?.length) {
+    return []
+  }
+
+  const seen = new Set<string>()
+  const result: OIChangeEntry[] = []
+
+  for (const entry of entries) {
+    const key = `${entry.value}|${entry.time}`
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    result.push(entry)
+  }
+
+  return result
+}
+
 function mergeOIHistoryMaps(apiHistory: OIHistoryMap, runtimeHistory: OIHistoryMap) {
   const merged: OIHistoryMap = { ...apiHistory }
 
@@ -60,8 +80,8 @@ function mergeOIHistoryMaps(apiHistory: OIHistoryMap, runtimeHistory: OIHistoryM
     const existing = merged[strike] ?? { CE: [], PE: [] }
 
     merged[strike] = {
-      CE: existing.CE.length ? existing.CE : runtimeEntry.CE,
-      PE: existing.PE.length ? existing.PE : runtimeEntry.PE,
+      CE: dedupeOIEntries(existing.CE.length ? existing.CE : runtimeEntry.CE),
+      PE: dedupeOIEntries(existing.PE.length ? existing.PE : runtimeEntry.PE),
     }
   }
 
@@ -136,11 +156,13 @@ function sparkline(series: number[] | undefined) {
 }
 
 function OISeriesValues({ series, align }: { series: OIChangeEntry[] | undefined; align: "left" | "right" }) {
-  if (!series?.length) {
+  const deduped = dedupeOIEntries(series)
+
+  if (!deduped.length) {
     return <span className="oi-series-empty">No OI change yet</span>
   }
 
-  const visible = series.slice(-12)
+  const visible = deduped.slice(-12)
 
   return (
     <div className={`oi-values ${align}`}>
@@ -189,6 +211,14 @@ function buildOIHistoryMap(events: OIChangeEvent[]) {
       value: event.oi_change,
       time: formattedTime,
     })
+  }
+
+  for (const rawStrike of Object.keys(grouped)) {
+    const strike = Number(rawStrike)
+    grouped[strike] = {
+      CE: dedupeOIEntries(grouped[strike].CE),
+      PE: dedupeOIEntries(grouped[strike].PE),
+    }
   }
 
   return grouped
