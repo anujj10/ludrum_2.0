@@ -34,6 +34,10 @@ func NewAPIClient(appID, accessToken string) *APIClient {
 }
 
 func (c *APIClient) FetchOptionChain(ctx context.Context, symbol, timestamp string, strikeCount int) (*models.OptionChainResponse, error) {
+	if c == nil || c.model == nil {
+		return nil, fmt.Errorf("fyers api client is not initialized")
+	}
+
 	type result struct {
 		raw string
 		err error
@@ -41,6 +45,12 @@ func (c *APIClient) FetchOptionChain(ctx context.Context, symbol, timestamp stri
 
 	ch := make(chan result, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- result{err: fmt.Errorf("panic while fetching fyers option chain: %v", r)}
+			}
+		}()
+
 		raw, err := c.model.GetOptionChain(fyersgosdk.OptionChainRequest{
 			Symbol:      symbol,
 			Timestamp:   timestamp,
@@ -55,6 +65,9 @@ func (c *APIClient) FetchOptionChain(ctx context.Context, symbol, timestamp stri
 	case out := <-ch:
 		if out.err != nil {
 			return nil, out.err
+		}
+		if out.raw == "" {
+			return nil, fmt.Errorf("empty fyers option chain response")
 		}
 
 		payload, err := decodeOptionChain(out.raw)
