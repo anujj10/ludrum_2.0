@@ -23,6 +23,16 @@ type FyersStatus = {
   last_connected_at?: string
 }
 
+type FyersRuntimeStatus = {
+  connected: boolean
+  status: string
+  runtime_state: string
+  has_payload: boolean
+  pair_count: number
+  last_tick_at?: string
+  last_error?: string
+}
+
 export default function App() {
   const [marketOverrideReason, setMarketOverrideReason] = useState("")
   const [adminAuthState, setAdminAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
@@ -30,6 +40,7 @@ export default function App() {
   const [userAuthState, setUserAuthState] = useState<"idle" | "loading" | "ready" | "blocked">("idle")
   const [user, setUser] = useState<AppUser | null>(null)
   const [fyersStatus, setFyersStatus] = useState<FyersStatus | null>(null)
+  const [runtimeStatus, setRuntimeStatus] = useState<FyersRuntimeStatus | null>(null)
   const [brokerConnectMessage, setBrokerConnectMessage] = useState("")
   const hostname = window.location.hostname.toLowerCase()
   const isAdminHost = hostname === "admin.ludrum.online" || hostname.startsWith("admin.")
@@ -104,6 +115,7 @@ export default function App() {
       setUserAuthState("blocked")
       setUser(null)
       setFyersStatus(null)
+      setRuntimeStatus(null)
       return
     }
 
@@ -156,6 +168,7 @@ export default function App() {
         window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
         setUser(null)
         setFyersStatus(null)
+        setRuntimeStatus(null)
         setUserAuthState("blocked")
       })
 
@@ -212,6 +225,43 @@ export default function App() {
   }, [isAdminHost])
 
   useEffect(() => {
+    if (isAdminHost || userAuthState !== "ready" || !user?.client_id || !fyersStatus?.connected) {
+      setRuntimeStatus(null)
+      return
+    }
+
+    let active = true
+
+    const refreshRuntimeStatus = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/broker/fyers/runtime`, {
+          headers: authHeaders(),
+        })
+        const payload = (await response.json().catch(() => ({}))) as FyersRuntimeStatus
+        if (!active) return
+
+        if (response.ok) {
+          setRuntimeStatus(payload)
+        }
+      } catch {
+        if (active) {
+          setRuntimeStatus(null)
+        }
+      }
+    }
+
+    void refreshRuntimeStatus()
+    const interval = window.setInterval(() => {
+      void refreshRuntimeStatus()
+    }, 10000)
+
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [isAdminHost, userAuthState, user?.client_id, fyersStatus?.connected])
+
+  useEffect(() => {
     if (isAdminHost || marketOverrideReason || userAuthState !== "ready" || !fyersStatus?.connected) {
       return
     }
@@ -253,10 +303,11 @@ export default function App() {
       setAdminClientId(payload.admin.client_id)
       setAdminAuthState("ready")
       return { ok: true }
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : "Unknown network error"
       return {
         ok: false,
-        error: "Admin login failed. Check the API and try again.",
+        error: `Admin login failed before the API could respond: ${message}`,
       }
     }
   }
@@ -289,6 +340,7 @@ export default function App() {
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
     setUser(null)
     setFyersStatus(null)
+    setRuntimeStatus(null)
     setBrokerConnectMessage("")
     setUserAuthState("blocked")
   }
@@ -364,6 +416,7 @@ export default function App() {
         onLogout={handleUserLogout}
         onStartConnect={handleFyersConnectStart}
         status={fyersStatus}
+        runtimeStatus={runtimeStatus}
         initialMessage={brokerConnectMessage}
       />
     )
@@ -377,6 +430,7 @@ export default function App() {
       email={user.email}
       clientId={user.client_id}
       fyersStatus={fyersStatus}
+      runtimeStatus={runtimeStatus}
       onLogout={handleUserLogout}
       onReconnectBroker={handleFyersConnectStart}
     />
