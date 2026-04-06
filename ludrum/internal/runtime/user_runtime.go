@@ -345,6 +345,10 @@ func (r *UserRuntime) recordOIEvents(symbol string, ts time.Time, pairs []models
 func appendOIEvent(existing []OIEvent, next OIEvent) ([]OIEvent, bool) {
 	if len(existing) > 0 {
 		last := existing[len(existing)-1]
+		if last.OIChange == next.OIChange && sameMarketMinute(last.Time, next.Time) {
+			existing[len(existing)-1] = next
+			return existing, false
+		}
 		if last.OIChange == next.OIChange && last.LTPChange == next.LTPChange {
 			return existing, false
 		}
@@ -356,6 +360,21 @@ func appendOIEvent(existing []OIEvent, next OIEvent) ([]OIEvent, bool) {
 		existing = existing[len(existing)-maxOIEvents:]
 	}
 	return existing, true
+}
+
+func sameMarketMinute(a, b time.Time) bool {
+	marketLoc, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		return a.UTC().Truncate(time.Minute).Equal(b.UTC().Truncate(time.Minute))
+	}
+
+	aa := a.In(marketLoc)
+	bb := b.In(marketLoc)
+	return aa.Year() == bb.Year() &&
+		aa.Month() == bb.Month() &&
+		aa.Day() == bb.Day() &&
+		aa.Hour() == bb.Hour() &&
+		aa.Minute() == bb.Minute()
 }
 
 func recentOIEvents(entries []OIEvent, limit int) []OIEvent {

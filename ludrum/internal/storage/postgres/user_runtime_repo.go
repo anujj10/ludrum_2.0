@@ -135,7 +135,23 @@ func LoadUserRuntimeOIEvents(ctx context.Context, userID, accountID int64, symbo
 	rows, err := DB.Query(
 		readCtx,
 		`
-		WITH ranked AS (
+		WITH deduped AS (
+			SELECT DISTINCT ON (strike, option_type, date_trunc('minute', time), oi_change)
+				time,
+				symbol,
+				strike,
+				option_type,
+				oi_change,
+				ltp_change
+			FROM user_option_oi_change_events
+			WHERE user_id = $1
+			  AND account_id = $2
+			  AND symbol = $3
+			  AND strike = ANY($4)
+			  AND time >= $5
+			ORDER BY strike, option_type, date_trunc('minute', time), oi_change, time DESC
+		),
+		ranked AS (
 			SELECT
 				time,
 				symbol,
@@ -147,12 +163,7 @@ func LoadUserRuntimeOIEvents(ctx context.Context, userID, accountID int64, symbo
 					PARTITION BY strike, option_type
 					ORDER BY time DESC
 				) AS rn
-			FROM user_option_oi_change_events
-			WHERE user_id = $1
-			  AND account_id = $2
-			  AND symbol = $3
-			  AND strike = ANY($4)
-			  AND time >= $5
+			FROM deduped
 		)
 		SELECT time, symbol, strike, option_type, oi_change, ltp_change
 		FROM ranked

@@ -105,7 +105,21 @@ func handleOIEvents(w http.ResponseWriter, r *http.Request) {
 	rows, err := postgres.DB.Query(
 		r.Context(),
 		`
-		WITH ranked AS (
+		WITH deduped AS (
+			SELECT DISTINCT ON (strike, option_type, date_trunc('minute', time), oi_change)
+				time,
+				symbol,
+				strike,
+				option_type,
+				oi_change,
+				ltp_change
+			FROM option_oi_change_events
+			WHERE symbol = $1
+			  AND strike = ANY($2)
+			  AND time >= $3
+			ORDER BY strike, option_type, date_trunc('minute', time), oi_change, time DESC
+		),
+		ranked AS (
 			SELECT
 				time,
 				symbol,
@@ -117,10 +131,7 @@ func handleOIEvents(w http.ResponseWriter, r *http.Request) {
 					PARTITION BY strike, option_type
 					ORDER BY time DESC
 				) AS rn
-			FROM option_oi_change_events
-			WHERE symbol = $1
-			  AND strike = ANY($2)
-			  AND time >= $3
+			FROM deduped
 		)
 		SELECT time, symbol, strike, option_type, oi_change, ltp_change
 		FROM ranked
