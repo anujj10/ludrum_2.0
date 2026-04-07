@@ -33,16 +33,20 @@ func optionStateKey(symbol string, strike float64, optionType string) string {
 }
 
 func loadLastSnapshotState(ctx context.Context, opt types.DBOption) (optionSnapshotState, bool, error) {
+	sessionStart := CurrentMarketSessionStartUTC(time.Now().UTC())
+
 	row := DB.QueryRow(
 		ctx,
 		`SELECT oi, ltp
-		 FROM market_snapshots
+		 FROM option_chain
 		 WHERE symbol = $1 AND strike = $2 AND option_type = $3
+		   AND time >= $4
 		 ORDER BY time DESC
 		 LIMIT 1`,
 		opt.Symbol,
 		opt.Strike,
 		opt.OptionType,
+		sessionStart,
 	)
 
 	var state optionSnapshotState
@@ -165,24 +169,29 @@ func SaveOptionsAndOIEvents(options []types.DBOption) {
 }
 
 func loadLastEventLTP(ctx context.Context, opt types.DBOption) (optionEventState, bool, error) {
+	sessionStart := CurrentMarketSessionStartUTC(time.Now().UTC())
+
 	row := DB.QueryRow(
 		ctx,
 		`SELECT chain.ltp
 		 FROM option_oi_change_events events
 		 JOIN LATERAL (
 			SELECT ltp
-			FROM market_snapshots
+			FROM option_chain
 			WHERE symbol = events.symbol AND strike = events.strike AND option_type = events.option_type
 			AND time <= events.time
+			AND time >= $4
 			ORDER BY time DESC
 			LIMIT 1
 		 ) chain ON true
 		 WHERE events.symbol = $1 AND events.strike = $2 AND events.option_type = $3
+		   AND events.time >= $4
 		 ORDER BY events.time DESC
 		 LIMIT 1`,
 		opt.Symbol,
 		opt.Strike,
 		opt.OptionType,
+		sessionStart,
 	)
 
 	var ltp float64
