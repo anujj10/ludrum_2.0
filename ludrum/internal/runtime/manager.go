@@ -12,6 +12,7 @@ type Manager struct {
 	baseCtx  context.Context
 	mu       sync.RWMutex
 	runtimes map[string]*UserRuntime
+	leaderKey string
 }
 
 func NewManager(ctx context.Context) *Manager {
@@ -37,6 +38,7 @@ func (m *Manager) EnsureUserRuntime(ctx context.Context, config fyers.RuntimeCon
 
 	if existing, ok := m.runtimes[key]; ok {
 		existing.ApplyConfig(config)
+		existing.SetSharedPersistence(m.leaderKey == key)
 		return existing, nil
 	}
 
@@ -49,6 +51,10 @@ func (m *Manager) EnsureUserRuntime(ctx context.Context, config fyers.RuntimeCon
 	if err := runtime.Start(runtimeCtx); err != nil {
 		return nil, err
 	}
+	if m.leaderKey == "" {
+		m.leaderKey = key
+	}
+	runtime.SetSharedPersistence(m.leaderKey == key)
 	m.runtimes[key] = runtime
 	return runtime, nil
 }
@@ -67,6 +73,14 @@ func (m *Manager) StopUserRuntime(userID, accountID int64) {
 	runtime, ok := m.runtimes[key]
 	if ok {
 		delete(m.runtimes, key)
+		if m.leaderKey == key {
+			m.leaderKey = ""
+			for nextKey, nextRuntime := range m.runtimes {
+				m.leaderKey = nextKey
+				nextRuntime.SetSharedPersistence(true)
+				break
+			}
+		}
 	}
 	m.mu.Unlock()
 

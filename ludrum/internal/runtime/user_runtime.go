@@ -31,6 +31,8 @@ type UserRuntime struct {
 	pipeline   *processor.Pipeline
 	sim        *simulator.Simulator
 	oiEvents   map[string][]OIEvent
+	persistShared bool
+	lastSharedSnapshotBucket string
 }
 
 func NewUserRuntime(config fyers.RuntimeConfig) *UserRuntime {
@@ -78,6 +80,15 @@ func (r *UserRuntime) ApplyConfig(config fyers.RuntimeConfig) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.config = config
+}
+
+func (r *UserRuntime) SetSharedPersistence(enabled bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.persistShared = enabled
+	if !enabled {
+		r.lastSharedSnapshotBucket = ""
+	}
 }
 
 func (r *UserRuntime) Snapshot() Snapshot {
@@ -215,6 +226,7 @@ func (r *UserRuntime) runCycle(ctx context.Context) error {
 	snap.Timestamp = time.Now().Unix()
 
 	streamPayload := r.pipeline.Process(snap, r.sim)
+	dbOptions := postgres.ConvertToDBOptions(payload.Data.OptionsChain)
 
 	now := time.Now().UTC()
 	newEvents := r.recordOIEvents(snap.Symbol, now, streamPayload.Pairs)
@@ -226,7 +238,24 @@ func (r *UserRuntime) runCycle(ctx context.Context) error {
 	r.latestPayload = streamPayload
 	r.hasPayload = true
 	r.revision++
+	shouldPersistShared := r.persistShared
+	lastBucket := r.lastSharedSnapshotBucket
 	r.mu.Unlock()
+
+	if shouldPersistShared && len(dbOptions) > 0 {
+		postgres.SaveOptionsBatch(dbOptions)
+		postgres.SaveOptionsAndOIEvents(dbOptions)
+
+		bucket := now.In(indiaLocation()).Format("2006-01-02 15:04")
+		if bucket != lastBucket {
+			postgres.SaveMinuteSnapshots(dbOptions)
+			r.mu.Lock()
+			if r.persistShared {
+				r.lastSharedSnapshotBucket = bucket
+			}
+			r.mu.Unlock()
+		}
+	}
 
 	if err := postgres.SaveUserRuntimeSnapshot(ctx, r.config.UserID, r.config.AccountID, streamPayload); err != nil && ctx.Err() == nil {
 		log.Printf("failed to persist runtime snapshot for user %d: %v", r.config.UserID, err)
@@ -406,4 +435,12 @@ func filterOIEventsSince(entries []OIEvent, cutoff time.Time) []OIEvent {
 	}
 
 	return filtered
+}
+
+func indiaLocation() *time.Location {
+	location, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		return time.UTC
+	}
+	return location
 }
