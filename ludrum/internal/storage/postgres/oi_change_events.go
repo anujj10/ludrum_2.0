@@ -28,6 +28,14 @@ var (
 	lastEventByKey    = map[string]optionEventState{}
 )
 
+func ResetOptionEventState() {
+	optionWriteMu.Lock()
+	defer optionWriteMu.Unlock()
+
+	lastSnapshotByKey = map[string]optionSnapshotState{}
+	lastEventByKey = map[string]optionEventState{}
+}
+
 func optionStateKey(symbol string, strike float64, optionType string) string {
 	return fmt.Sprintf("%s|%.2f|%s", symbol, strike, optionType)
 }

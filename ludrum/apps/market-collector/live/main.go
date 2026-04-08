@@ -49,6 +49,13 @@ func (c *snapshotCache) Get() ([]storageTypes.DBOption, bool) {
 	return append([]storageTypes.DBOption(nil), c.latest...), c.ok
 }
 
+func (c *snapshotCache) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.latest = nil
+	c.ok = false
+}
+
 func main() {
 	mode := os.Getenv("MODE")
 	if mode == "" {
@@ -78,96 +85,139 @@ func main() {
 	sim := simulator.NewSimulator()
 	liveSnapshotCache := &snapshotCache{}
 
-	atmTracker := ltpSeries.NewATMTracker(50)
-	selector := ltpSeries.NewStrikeSelector(2, "24APR", 50)
-	ltpStore := ltpSeries.NewMarketStore(5)
-	fetcher := ltpSeries.NewFyersFetcher(fyModel)
-	poller := ltpSeries.NewLTPPoller(fetcher, ltpStore)
-	ltpEngine := ltpSeries.NewLTPEngine(atmTracker, selector, poller)
+	type collectorSession struct {
+		cancel    context.CancelFunc
+		wsIngestor *optionData.WSIngestor
+	}
 
-	store := processor.NewMarketStore()
-	wsIngestor := optionData.NewWSIngestor(
-		store,
-		pipeline,
-		state,
-		redisClient,
-		dbWorker,
-		sim,
+	var (
+		sessionMu sync.Mutex
+		session   *collectorSession
 	)
-	wsIngestor.SetOnTick(func(ltp float64) {
-		ltpEngine.OnIndexTick(ltp)
-	})
 
-	var collectorsOnce sync.Once
 	startCollectors := func() {
-		collectorsOnce.Do(func() {
-			log.Println("Market open: starting live collectors.")
-			ltpEngine.Start(ctx)
+		sessionMu.Lock()
+		defer sessionMu.Unlock()
 
-			go wsIngestor.Start(ctx, cfg.AppID, cfg.AccessToken, []string{"NSE:NIFTY50-INDEX"})
+		if session != nil {
+			return
+		}
 
-			go func() {
-				ticker := time.NewTicker(1 * time.Second)
-				defer ticker.Stop()
+		if cfg.AppID == "" || cfg.AccessToken == "" {
+			log.Println("Market open, but collector credentials are missing. Skipping collector start.")
+			return
+		}
 
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						runLivePipeline(fyModel, pipeline, state, redisClient, dbWorker, sim, liveSnapshotCache)
+		postgres.ResetOptionEventState()
+		liveSnapshotCache.Reset()
+
+		atmTracker := ltpSeries.NewATMTracker(50)
+		selector := ltpSeries.NewStrikeSelector(2, "24APR", 50)
+		ltpStore := ltpSeries.NewMarketStore(5)
+		fetcher := ltpSeries.NewFyersFetcher(fyModel)
+		poller := ltpSeries.NewLTPPoller(fetcher, ltpStore)
+		ltpEngine := ltpSeries.NewLTPEngine(atmTracker, selector, poller)
+
+		store := processor.NewMarketStore()
+		sessionCtx, sessionCancel := context.WithCancel(ctx)
+		wsIngestor := optionData.NewWSIngestor(
+			store,
+			pipeline,
+			state,
+			redisClient,
+			dbWorker,
+			sim,
+		)
+		wsIngestor.SetOnTick(func(ltp float64) {
+			ltpEngine.OnIndexTick(ltp)
+		})
+
+		session = &collectorSession{
+			cancel:    sessionCancel,
+			wsIngestor: wsIngestor,
+		}
+
+		log.Println("Market open: starting live collectors.")
+		ltpEngine.Start(sessionCtx)
+		go wsIngestor.Start(sessionCtx, cfg.AppID, cfg.AccessToken, []string{"NSE:NIFTY50-INDEX"})
+
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-sessionCtx.Done():
+					return
+				case <-ticker.C:
+					runLivePipeline(fyModel, pipeline, state, redisClient, dbWorker, sim, liveSnapshotCache)
+				}
+			}
+		}()
+
+		go func() {
+			ticker := time.NewTicker(1 * time.Minute)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-sessionCtx.Done():
+					return
+				case <-ticker.C:
+					snapshotRows, ok := liveSnapshotCache.Get()
+					if !ok {
+						continue
+					}
+					go postgres.SaveMinuteSnapshots(snapshotRows)
+					if len(snapshotRows) > 0 {
+						log.Printf("Persisted %d market snapshot rows @ %s", len(snapshotRows), snapshotRows[0].Time.Format("15:04:05"))
 					}
 				}
-			}()
+			}
+		}()
 
-			go func() {
-				ticker := time.NewTicker(1 * time.Minute)
-				defer ticker.Stop()
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
 
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						snapshotRows, ok := liveSnapshotCache.Get()
-						if !ok {
+			for {
+				select {
+				case <-sessionCtx.Done():
+					return
+				case <-ticker.C:
+					for symbol := range poller.GetTrackedSymbols() {
+						pollState := ltpStore.GetState(symbol)
+						if pollState == nil {
 							continue
 						}
-						go postgres.SaveMinuteSnapshots(snapshotRows)
-						if len(snapshotRows) > 0 {
-							log.Printf("Persisted %d market snapshot rows @ %s", len(snapshotRows), snapshotRows[0].Time.Format("15:04:05"))
+
+						alpha := processor.ComputeAlphaFromLTP(pollState.History)
+						payload := map[string]interface{}{
+							"symbol": symbol,
+							"alpha":  alpha,
 						}
+						log.Println("LTP ALPHA:", symbol, alpha.Signal)
+						redisClient.PublishLTP(payload)
 					}
 				}
-			}()
+			}
+		}()
+	}
 
-			go func() {
-				ticker := time.NewTicker(1 * time.Second)
-				defer ticker.Stop()
+	stopCollectors := func(reason string) {
+		sessionMu.Lock()
+		defer sessionMu.Unlock()
 
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						for symbol := range poller.GetTrackedSymbols() {
-							pollState := ltpStore.GetState(symbol)
-							if pollState == nil {
-								continue
-							}
+		if session == nil {
+			return
+		}
 
-							alpha := processor.ComputeAlphaFromLTP(pollState.History)
-							payload := map[string]interface{}{
-								"symbol": symbol,
-								"alpha":  alpha,
-							}
-							log.Println("LTP ALPHA:", symbol, alpha.Signal)
-							redisClient.PublishLTP(payload)
-						}
-					}
-				}
-			}()
-		})
+		log.Printf("Stopping live collectors: %s", reason)
+		session.cancel()
+		session.wsIngestor.Stop()
+		session = nil
+		liveSnapshotCache.Reset()
+		postgres.ResetOptionEventState()
 	}
 
 	apiServer := api.NewServer(state, runtimeManager)
@@ -183,23 +233,29 @@ func main() {
 		startCollectors()
 	} else {
 		log.Println("Market closed: auth/API stays online, live collectors paused.")
-		go func() {
-			ticker := time.NewTicker(30 * time.Second)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					if isIndianMarketOpen(time.Now()) {
-						startCollectors()
-						return
-					}
-				}
-			}
-		}()
 	}
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		lastOpenState := isIndianMarketOpen(time.Now())
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				openNow := isIndianMarketOpen(time.Now())
+				if openNow && !lastOpenState {
+					startCollectors()
+				}
+				if !openNow && lastOpenState {
+					stopCollectors("market session closed")
+				}
+				lastOpenState = openNow
+			}
+		}
+	}()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -210,8 +266,8 @@ func main() {
 	}
 
 	log.Println("Shutting down system...")
+	stopCollectors("application shutdown")
 	cancel()
-	wsIngestor.Stop()
 	log.Println("Shutdown complete")
 }
 
