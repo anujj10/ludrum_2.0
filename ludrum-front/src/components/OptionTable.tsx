@@ -66,9 +66,10 @@ function appendOIHistoryEntry(entries: OIChangeEntry[] | undefined, value: numbe
     return entries ?? []
   }
 
+  const nextTime = formatEventTime(new Date().toISOString())
   const nextEntry = {
     value,
-    time: formatEventTime(new Date().toISOString()),
+    time: nextTime,
   }
 
   if (!entries?.length) {
@@ -76,11 +77,11 @@ function appendOIHistoryEntry(entries: OIChangeEntry[] | undefined, value: numbe
   }
 
   const lastEntry = entries[entries.length - 1]
-  if (lastEntry.value === value) {
+  if (lastEntry.time === nextTime && formatTapeValue(lastEntry.value) === formatTapeValue(value)) {
     return entries
   }
 
-  return [...entries.slice(-11), nextEntry]
+  return dedupeOIEntries([...entries.slice(-11), nextEntry])
 }
 
 function dedupeOIEntries(entries: OIChangeEntry[] | undefined) {
@@ -92,7 +93,7 @@ function dedupeOIEntries(entries: OIChangeEntry[] | undefined) {
   const result: OIChangeEntry[] = []
 
   for (const entry of entries) {
-    const key = `${entry.value}|${entry.time}`
+    const key = `${formatTapeValue(entry.value)}|${entry.time}`
     if (seen.has(key)) {
       continue
     }
@@ -232,7 +233,7 @@ function buildOIHistoryMap(events: OIChangeEvent[]) {
     }
 
     const formattedTime = formatEventTime(event.time)
-    const dedupeKey = `${strike}|${event.option_type}|${event.oi_change}|${formattedTime}`
+    const dedupeKey = `${strike}|${event.option_type}|${formatTapeValue(event.oi_change)}|${formattedTime}`
     if (seen.has(dedupeKey)) {
       continue
     }
