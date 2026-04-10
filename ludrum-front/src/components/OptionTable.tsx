@@ -90,7 +90,7 @@ function dedupeOIEntries(entries: OIChangeEntry[] | undefined) {
   }
 
   const seen = new Set<string>()
-  const result: OIChangeEntry[] = []
+  const exactDeduped: OIChangeEntry[] = []
 
   for (const entry of entries) {
     const key = `${formatTapeValue(entry.value)}|${entry.time}`
@@ -98,6 +98,24 @@ function dedupeOIEntries(entries: OIChangeEntry[] | undefined) {
       continue
     }
     seen.add(key)
+    exactDeduped.push(entry)
+  }
+
+  const result: OIChangeEntry[] = []
+  for (const entry of exactDeduped) {
+    const last = result[result.length - 1]
+    if (!last) {
+      result.push(entry)
+      continue
+    }
+
+    if (formatTapeValue(last.value) === formatTapeValue(entry.value)) {
+      if (entry.time > last.time) {
+        result[result.length - 1] = entry
+      }
+      continue
+    }
+
     result.push(entry)
   }
 

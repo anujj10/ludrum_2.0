@@ -374,11 +374,8 @@ func (r *UserRuntime) recordOIEvents(symbol string, ts time.Time, pairs []models
 func appendOIEvent(existing []OIEvent, next OIEvent) ([]OIEvent, bool) {
 	if len(existing) > 0 {
 		last := existing[len(existing)-1]
-		if last.OIChange == next.OIChange && sameMarketMinute(last.Time, next.Time) {
+		if last.OIChange == next.OIChange {
 			existing[len(existing)-1] = next
-			return existing, false
-		}
-		if last.OIChange == next.OIChange && last.LTPChange == next.LTPChange {
 			return existing, false
 		}
 	}
